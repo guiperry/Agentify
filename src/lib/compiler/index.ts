@@ -245,7 +245,7 @@ export class AgentCompiler {
         // Convert JavaScript object properties to Go map syntax
         const converted = content
           .replace(/(\w+):/g, '"$1":') // Convert property names to strings
-          .replace(/\[([^\]]+)\]/g, (arrayMatch, arrayContent) => {
+          .replace(/\[([^\]]+)\]/g, (arrayMatch: string, arrayContent: string) => {
             // Convert JavaScript arrays to Go slices
             if (arrayContent.includes('"')) {
               return `[]string{${arrayContent}}`;

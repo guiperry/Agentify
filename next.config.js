@@ -2,12 +2,17 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  // Configure for Netlify deployment
+  trailingSlash: true,
   // Allow importing of Go/Python files for the compiler
-  webpack: (config) => {
-    config.module.rules.push({
-      test: /\.(go|py)$/,
-      use: 'raw-loader',
-    });
+  webpack: (config, { isServer }) => {
+    // Only add raw-loader for client-side builds to avoid issues
+    if (!isServer) {
+      config.module.rules.push({
+        test: /\.(go|py)$/,
+        use: 'raw-loader',
+      });
+    }
     return config;
   },
 };

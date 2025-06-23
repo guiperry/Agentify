@@ -2,8 +2,12 @@
   # Build command that ensures toolchain and directories exist before Next.js build
   command = "npm run install-toolchain && npm run build"
 
-  # Publish directory (Next.js default)
+  # Publish directory for Next.js App Router
   publish = ".next"
+
+# Use Netlify's Next.js plugin for proper deployment
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 [build.environment]
   # Node.js version
@@ -28,10 +32,9 @@
 [build.processing]
   skip_processing = false
 
-# Include necessary files in the build
-[build.ignore]
-  # Don't ignore these important directories
-  command = "exit 1"
+# Build ignore configuration - always build for now
+# [build.ignore]
+#   command = "exit 1"
 
 # Headers for static assets
 [[headers]]
@@ -45,9 +48,9 @@
   to = "/.netlify/functions/:splat"
   status = 200
 
-# Functions configuration (if you plan to use Netlify Functions)
-[functions]
-  directory = "netlify/functions"
+# Functions configuration (disabled for now)
+# [functions]
+#   directory = "netlify/functions"
 
 # Build hooks for different branches
 [context.production]
