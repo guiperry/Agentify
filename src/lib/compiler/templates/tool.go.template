@@ -13,7 +13,4 @@ func {{.toolName}}(params map[string]interface{}) (interface{}, error) {
 	{{.toolImplementation}}
 }
 
-// Register the tool
-func init() {
-	RegisterTool("{{.toolName}}", {{.toolName}})
-}
+// Tool registration is handled by the main plugin initialization

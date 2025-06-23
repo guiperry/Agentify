@@ -150,6 +150,8 @@ const Index = () => {
             setDownloadModalOpen={setDownloadModalOpen}
             onDownload={(platform) => {
               console.log(`Downloading Agentic Engine for ${platform}`);
+              // Trigger download via API
+              window.open(`/api/download/engine/${platform}`, '_blank');
               setDownloadModalOpen(false);
             }}
             settingsModalOpen={settingsModalOpen}
@@ -168,6 +170,8 @@ const Index = () => {
             setDownloadModalOpen={setDownloadModalOpen}
             onDownload={(platform) => {
               console.log(`Downloading Agentic Engine for ${platform}`);
+              // Trigger download via API
+              window.open(`/api/download/engine/${platform}`, '_blank');
               setDownloadModalOpen(false);
             }}
             settingsModalOpen={settingsModalOpen}

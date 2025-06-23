@@ -69,10 +69,16 @@ export async function POST(request: Request) {
     // Compile the agent
     const pluginPath = await compilerService.compileAgent(pluginConfig);
 
+    // Extract filename from the plugin path for download URL
+    const filename = pluginPath.split('/').pop() || '';
+    const downloadUrl = `/api/download/plugin/${filename}`;
+
     // Return success response
     return NextResponse.json({
       success: true,
       pluginPath,
+      downloadUrl,
+      filename,
       message: 'Agent compiled successfully'
     });
   } catch (error) {

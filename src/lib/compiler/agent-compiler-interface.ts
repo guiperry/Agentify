@@ -150,24 +150,41 @@ export interface AgentCompilerService {
 export async function createAgentCompilerService(): Promise<AgentCompilerService> {
   // Import the AgentCompiler class
   const { AgentCompiler } = await import('.');
-  
+
   // Get the default directories
   // For Next.js, we need to adjust the paths
   const appRoot = process.cwd();
   const defaultTemplateDir = path.join(appRoot, 'src', 'lib', 'compiler', 'templates');
   const defaultOutputDir = path.join(appRoot, 'public', 'output');
-  
+
   // Create the output directory if it doesn't exist
   if (!fs.existsSync(defaultOutputDir)) {
     fs.mkdirSync(defaultOutputDir, { recursive: true });
   }
-  
+
   // Create the compiler instance
-  const compiler = new AgentCompiler(
-    appRoot,
-    defaultTemplateDir,
-    defaultOutputDir
-  );
+  const compiler = new AgentCompiler(appRoot, defaultTemplateDir, defaultOutputDir);
+
+  // Check toolchain availability
+  const toolchain = await compiler.checkToolchain();
+  if (!toolchain.go || !toolchain.python) {
+    console.warn('⚠️  Missing toolchain components:', {
+      go: toolchain.go ? '✅' : '❌',
+      python: toolchain.python ? '✅' : '❌',
+      gcc: toolchain.gcc ? '✅' : '❌'
+    });
+
+    // In development, we can try to install missing tools
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('🛠️  Attempting to install missing tools...');
+      try {
+        await compiler.installToolchain();
+      } catch (error) {
+        console.error('❌ Failed to install toolchain:', error);
+        console.log('ℹ️  Falling back to mock compilation mode');
+      }
+    }
+  }
   
   return {
     compileAgent: (config: AgentPluginConfig) => compiler.compileAgent(config),

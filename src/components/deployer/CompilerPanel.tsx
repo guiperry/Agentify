@@ -95,7 +95,10 @@ export interface AgentPluginConfig {
 export interface CompilerResult {
   success: boolean;
   pluginPath?: string;
+  downloadUrl?: string;
+  filename?: string;
   message: string;
+  logs?: string[];
 }
 
 interface CompilerPanelProps {
@@ -272,10 +275,9 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
         }
         
         // Add download link if plugin was created
-        if (result.success && result.pluginPath) {
-          const downloadUrl = result.pluginPath;
-          addLogEntry(`Download plugin: ${downloadUrl}`);
-          addLogEntry(`<a href="${downloadUrl}" target="_blank" style="color: #8b5cf6;">Click here to download the plugin</a>`);
+        if (result.success && result.downloadUrl) {
+          addLogEntry(`Plugin ready for download: ${result.filename}`);
+          addLogEntry(`<a href="${result.downloadUrl}" target="_blank" style="color: #8b5cf6;">Click here to download the plugin</a>`);
         }
         
         // Notify parent component
@@ -388,17 +390,15 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
                           </h4>
                           <p className="text-sm text-slate-300 mt-1">{compileResult.message}</p>
                           
-                          {compileResult.success && compileResult.pluginPath && (
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
+                          {compileResult.success && compileResult.downloadUrl && (
+                            <Button
+                              variant="outline"
+                              size="sm"
                               className="mt-2 border-green-800 text-green-400 hover:bg-green-900/30"
-                              asChild
+                              onClick={() => window.open(compileResult.downloadUrl, '_blank')}
                             >
-                              <a href={compileResult.pluginPath} download>
-                                <Download className="mr-2 h-4 w-4" />
-                                Download Plugin
-                              </a>
+                              <Download className="mr-2 h-4 w-4" />
+                              Download Plugin ({compileResult.filename})
                             </Button>
                           )}
                         </div>
