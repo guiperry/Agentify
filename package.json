@@ -94,16 +94,13 @@
     "@types/react-dom": "^18.3.0",
     "@types/sqlite3": "^3.1.11",
     "@types/uuid": "^10.0.0",
-    "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.0",
     "eslint": "^8.0.0",
     "eslint-config-next": "^14.2.30",
     "jest": "^30.0.2",
     "jest-environment-jsdom": "^30.0.2",
     "nodemon": "^3.0.0",
-    "postcss": "^8.4.47",
     "raw-loader": "^4.0.2",
-    "tailwindcss": "^3.4.11",
     "ts-jest": "^29.4.0",
     "typescript": "^5.5.3"
   }

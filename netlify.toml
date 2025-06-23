@@ -1,6 +1,7 @@
 [build]
   # Build command that ensures toolchain and directories exist before Next.js build
-  command = "npm run install-toolchain && npm run build"
+  # Force clean install to avoid cache issues
+  command = "npm ci && npm run install-toolchain && npm run build"
 
   # Publish directory for Next.js App Router
   publish = ".next"
@@ -54,10 +55,10 @@
 
 # Build hooks for different branches
 [context.production]
-  command = "npm run build"
+  command = "npm ci && npm run install-toolchain && npm run build"
 
 [context.deploy-preview]
-  command = "npm run build"
+  command = "npm ci && npm run install-toolchain && npm run build"
 
 [context.branch-deploy]
-  command = "npm run build"
+  command = "npm ci && npm run install-toolchain && npm run build"
