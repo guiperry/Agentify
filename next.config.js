@@ -3,7 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
   // Configure for Netlify deployment
-  trailingSlash: true,
+  // trailingSlash: true, // Disabled - can cause issues with API routes on Netlify
   // Allow importing of Go/Python files for the compiler
   webpack: (config, { isServer }) => {
     // Only add raw-loader for client-side builds to avoid issues

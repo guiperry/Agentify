@@ -3,12 +3,17 @@
   # Force clean install to avoid cache issues
   command = "npm ci && npm run install-toolchain && npm run build"
 
-  # Publish directory for Next.js App Router
-  publish = ".next"
+  # Publish directory for Next.js on Netlify
+  # For Next.js with API routes, this should be omitted to let the plugin handle it
+  # publish = ".next"
 
-# Use Netlify's Next.js plugin for proper deployment
+# Explicitly configure the Next.js plugin to ensure API routes work
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+# Functions are automatically handled by the Next.js adapter
+# [functions]
+#   directory = "netlify/functions"
 
 [build.environment]
   # Node.js version
@@ -16,6 +21,9 @@
 
   # Ensure we're in production mode
   NODE_ENV = "production"
+
+  # Next.js specific environment variables
+  NEXT_PUBLIC_USE_REAL_BACKEND = "true"
 
   # Go version (for future use when real compilation is implemented)
   GO_VERSION = "1.21"
@@ -50,10 +58,11 @@
     Cache-Control = "public, max-age=31536000, immutable"
 
 # Redirects for SPA behavior (if needed)
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
+# Note: API routes are handled by Next.js App Router, not Netlify Functions
+# [[redirects]]
+#   from = "/api/*"
+#   to = "/.netlify/functions/:splat"
+#   status = 200
 
 # Functions configuration (disabled for now)
 # [functions]

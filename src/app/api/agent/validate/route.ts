@@ -29,10 +29,14 @@ interface ValidationResult {
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('Agent validation endpoint called');
     const body = await request.json();
     const { agentFacts } = body;
 
+    console.log('Received agent facts:', agentFacts);
+
     if (!agentFacts) {
+      console.log('No agent facts provided');
       return NextResponse.json({
         isValid: false,
         errors: { general: 'Agent facts are required' },

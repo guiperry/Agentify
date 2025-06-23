@@ -29,11 +29,11 @@ export interface ValidationResult {
 }
 
 class ConfigurationService {
-  private baseUrl = process.env.NEXT_PUBLIC_API_URL || '/api';
+  private baseUrl = '/api'; // Always use relative URLs
 
   async validateAgentFacts(agentFacts: AgentFacts): Promise<ValidationResult> {
     // Use mock validation for development, real API for production
-    const useRealBackend = process.env.NODE_ENV === 'production';
+    const useRealBackend = process.env.NODE_ENV === 'production' || process.env.NEXT_PUBLIC_USE_REAL_BACKEND === 'true';
 
     if (!useRealBackend) {
       return this.mockValidateAgentFacts(agentFacts);
