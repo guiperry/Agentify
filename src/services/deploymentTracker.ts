@@ -40,11 +40,11 @@ class DeploymentTracker {
   private messageListener: ((message: any) => void) | null = null;
 
   constructor() {
-    // Only initialize WebSocket if explicitly enabled
-    if (process.env.NEXT_PUBLIC_ENABLE_WEBSOCKET === 'true') {
+    // Only initialize WebSocket if explicitly enabled and in browser environment
+    if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_ENABLE_WEBSOCKET === 'true') {
       this.initializeWebSocket();
     } else {
-      console.log('WebSocket disabled - using local deployment tracking only');
+      console.log('WebSocket disabled or not in browser environment - using local deployment tracking only');
     }
   }
 

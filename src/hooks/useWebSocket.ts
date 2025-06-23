@@ -41,6 +41,7 @@ class WebSocketManager {
   private listeners = new Set<(message: WebSocketMessage) => void>();
   private statusListeners = new Set<(status: { isConnected: boolean; connectionStatus: string }) => void>();
   private isConnecting = false; // Prevent multiple simultaneous connection attempts
+  private isBrowser = typeof window !== 'undefined'; // Check if we're in browser environment
 
   private constructor() {}
 
@@ -76,9 +77,20 @@ class WebSocketManager {
   }
 
   connect() {
-    // Only connect if WebSocket is enabled
+    // Only connect if we're in a browser environment
+    if (!this.isBrowser) {
+      console.log('WebSocket not available in server environment');
+      return;
+    }
+
     if (process.env.NEXT_PUBLIC_ENABLE_WEBSOCKET !== 'true') {
       console.log('WebSocket disabled, NEXT_PUBLIC_ENABLE_WEBSOCKET =', process.env.NEXT_PUBLIC_ENABLE_WEBSOCKET);
+      return;
+    }
+
+    // Check if WebSocket is available in the browser
+    if (typeof WebSocket === 'undefined') {
+      console.log('WebSocket not supported in this environment');
       return;
     }
 
