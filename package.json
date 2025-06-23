@@ -81,6 +81,8 @@
     "tailwind-merge": "^2.5.2",
     "tailwindcss": "^3.4.11",
     "tailwindcss-animate": "^1.0.7",
+    "typescript": "^5.5.3",
+    "@types/node": "^22.5.5",
     "uuid": "^11.1.0",
     "vaul": "^0.9.3",
     "ws": "^8.18.2",
@@ -90,7 +92,6 @@
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.6.3",
     "@types/jest": "^30.0.0",
-    "@types/node": "^22.5.5",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/sqlite3": "^3.1.11",
@@ -102,7 +103,6 @@
     "jest-environment-jsdom": "^30.0.2",
     "nodemon": "^3.0.0",
     "raw-loader": "^4.0.2",
-    "ts-jest": "^29.4.0",
-    "typescript": "^5.5.3"
+    "ts-jest": "^29.4.0"
   }
 }
