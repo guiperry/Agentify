@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/setup-build.js && next build",
+    "build": "node scripts/setup-build.js && node scripts/test-imports.js && next build",
     "start": "next start",
     "lint": "next lint",
     "test": "jest",
@@ -20,7 +20,8 @@
     "install-toolchain": "node scripts/install-toolchain.js",
     "check-toolchain": "node scripts/install-toolchain.js --check-only",
     "test-compilation": "node scripts/test-compilation.js",
-    "test-go-compilation": "node scripts/test-go-compilation.js"
+    "test-go-compilation": "node scripts/test-go-compilation.js",
+    "test-imports": "node scripts/test-imports.js"
   },
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.1",

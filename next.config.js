@@ -13,6 +13,13 @@ const nextConfig = {
         use: 'raw-loader',
       });
     }
+
+    // Ensure proper module resolution for @ alias
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@': require('path').resolve(__dirname, 'src'),
+    };
+
     return config;
   },
 };

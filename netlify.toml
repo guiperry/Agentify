@@ -29,6 +29,12 @@
   # Build flags for native dependencies
   npm_config_build_from_source = "true"
 
+  # Ensure proper module resolution
+  NODE_OPTIONS = "--max-old-space-size=4096"
+
+  # Force case-sensitive module resolution
+  FORCE_COLOR = "1"
+
 # Build processing settings
 [build.processing]
   skip_processing = false
