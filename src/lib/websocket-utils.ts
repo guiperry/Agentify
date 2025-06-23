@@ -1,5 +1,6 @@
 // WebSocket utilities for server-side communication
 // Note: This is for server-side use only (API routes)
+// Disabled for serverless deployment compatibility
 
 interface WebSocketMessage {
   type: string;
@@ -21,69 +22,18 @@ interface DeploymentUpdate {
   message: string;
 }
 
-// WebSocket client for server-side communication
+// Stub WebSocket client for serverless environments
 class ServerWebSocketClient {
-  private ws: any = null;
   private isConnected = false;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 3;
 
   constructor() {
-    // Only initialize if WebSocket is enabled and we're in a Node.js environment
-    if (typeof window === 'undefined' && process.env.NEXT_PUBLIC_ENABLE_WEBSOCKET === 'true') {
-      this.connect();
-    }
-  }
-
-  private async connect() {
-    try {
-      // Dynamic import for server-side WebSocket
-      const WebSocket = (await import('ws')).default;
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws';
-      
-      this.ws = new WebSocket(wsUrl);
-      
-      this.ws.on('open', () => {
-        console.log('Server WebSocket connected');
-        this.isConnected = true;
-        this.reconnectAttempts = 0;
-      });
-
-      this.ws.on('close', () => {
-        console.log('Server WebSocket disconnected');
-        this.isConnected = false;
-        this.attemptReconnect();
-      });
-
-      this.ws.on('error', (error: Error) => {
-        console.error('Server WebSocket error:', error);
-        this.isConnected = false;
-      });
-    } catch (error) {
-      console.error('Failed to connect to WebSocket:', error);
-    }
-  }
-
-  private attemptReconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      const delay = Math.pow(2, this.reconnectAttempts) * 1000;
-      
-      setTimeout(() => {
-        console.log(`Attempting to reconnect WebSocket (attempt ${this.reconnectAttempts})`);
-        this.connect();
-      }, delay);
-    }
+    // WebSocket disabled for serverless deployment
+    console.log('Server WebSocket disabled for serverless deployment');
   }
 
   public sendMessage(message: WebSocketMessage) {
-    if (this.isConnected && this.ws) {
-      try {
-        this.ws.send(JSON.stringify(message));
-      } catch (error) {
-        console.error('Failed to send WebSocket message:', error);
-      }
-    }
+    // Stub implementation for serverless environment
+    console.log('WebSocket message (not sent in serverless):', message);
   }
 
   public sendCompilationUpdate(update: CompilationUpdate) {
@@ -103,10 +53,8 @@ class ServerWebSocketClient {
   }
 
   public disconnect() {
-    if (this.ws) {
-      this.ws.close();
-      this.isConnected = false;
-    }
+    // Stub implementation for serverless environment
+    console.log('WebSocket disconnect (no-op in serverless)');
   }
 }
 
@@ -120,7 +68,7 @@ export function getServerWebSocketClient(): ServerWebSocketClient {
   return serverWebSocketClient;
 }
 
-// Utility functions for sending updates
+// Utility functions for sending updates (stub implementations for serverless)
 export function sendCompilationUpdate(step: string, progress: number, message: string, status: 'in_progress' | 'completed' | 'error' = 'in_progress') {
   const client = getServerWebSocketClient();
   client.sendCompilationUpdate({
