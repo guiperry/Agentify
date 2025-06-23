@@ -54,10 +54,10 @@
 
 # Build hooks for different branches
 [context.production]
-  command = "npm run install-toolchain && npm run build"
+  command = "npm run build"
 
 [context.deploy-preview]
-  command = "npm run install-toolchain && npm run build"
+  command = "npm run build"
 
 [context.branch-deploy]
-  command = "npm run install-toolchain && npm run build"
+  command = "npm run build"

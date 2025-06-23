@@ -202,27 +202,34 @@ function installBuildTools() {
  */
 function verifyInstallation() {
   console.log('🔍 Verifying installation...');
-  
+
   const checks = [
     { name: 'Go', command: 'go', flag: 'version' },
     { name: 'Python', command: commandExists('python3') ? 'python3' : 'python', flag: '--version' },
     { name: 'GCC', command: 'gcc', flag: '--version' }
   ];
-  
+
   let allGood = true;
-  
+  const isCI = process.env.CI || process.env.NETLIFY || process.env.VERCEL;
+
   checks.forEach(check => {
     if (commandExists(check.command)) {
       const version = getVersion(check.command, check.flag);
       console.log(`✅ ${check.name}: ${version ? version.split('\n')[0] : 'Available'}`);
     } else {
-      console.log(`❌ ${check.name}: Not found`);
-      allGood = false;
+      if (isCI) {
+        console.log(`ℹ️  ${check.name}: Not available in CI environment (this is expected)`);
+      } else {
+        console.log(`❌ ${check.name}: Not found`);
+        allGood = false;
+      }
     }
   });
-  
+
   if (allGood) {
     console.log('🎉 All tools are installed and ready!');
+  } else if (isCI) {
+    console.log('ℹ️  Tool verification complete for CI environment');
   } else {
     console.log('⚠️  Some tools are missing. Please install them manually.');
   }
@@ -231,14 +238,36 @@ function verifyInstallation() {
 // Main execution
 async function main() {
   try {
+    // Check if we're in a CI/build environment like Netlify
+    const isCI = process.env.CI || process.env.NETLIFY || process.env.VERCEL;
+
+    if (isCI) {
+      console.log('🔍 Detected CI/build environment - checking available tools...');
+      verifyInstallation();
+
+      // In CI environments, we'll proceed even if tools are missing
+      // since the web app can still be built and deployed
+      console.log('ℹ️  Toolchain check complete for CI environment');
+      return;
+    }
+
+    // Full installation for local development
     installGo();
     installPython();
     installBuildTools();
     verifyInstallation();
-    
+
     console.log('✅ Toolchain installation complete!');
   } catch (error) {
     console.error('❌ Installation failed:', error.message);
+
+    // In CI environments, don't fail the build if toolchain installation fails
+    const isCI = process.env.CI || process.env.NETLIFY || process.env.VERCEL;
+    if (isCI) {
+      console.log('⚠️  Continuing build despite toolchain issues in CI environment');
+      return;
+    }
+
     process.exit(1);
   }
 }
