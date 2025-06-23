@@ -1,0 +1,21 @@
+package main
+
+import "fmt"
+
+// Embedded Python agent service script
+var pythonAgentServiceScript = `{{.pythonAgentServiceScript}}`
+
+// Embedded Python requirements
+var pythonRequirements = `{{.pythonRequirements}}`
+
+// GetResource returns a resource by name
+func GetResource(name string) ([]byte, error) {
+	// Resources would be embedded here based on agent configuration
+	return nil, fmt.Errorf("resource not found: %s", name)
+}
+
+// GetPrompt returns a prompt by name
+func GetPrompt(name string) (string, error) {
+	// Prompts would be embedded here based on agent configuration
+	return "", fmt.Errorf("prompt not found: %s", name)
+}

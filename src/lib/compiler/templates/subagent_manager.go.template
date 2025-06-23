@@ -1,0 +1,454 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"sync"
+	"time"
+)
+
+// SubagentLanguage represents the programming language of a subagent
+type SubagentLanguage string
+
+const (
+	PythonLanguage     SubagentLanguage = "python"
+	JavaScriptLanguage SubagentLanguage = "javascript"
+)
+
+// SubagentStatus represents the status of a subagent
+type SubagentStatus string
+
+const (
+	SubagentStatusInitializing SubagentStatus = "initializing"
+	SubagentStatusRunning      SubagentStatus = "running"
+	SubagentStatusStopped      SubagentStatus = "stopped"
+	SubagentStatusError        SubagentStatus = "error"
+)
+
+// SubagentConfig holds the configuration for a subagent
+type SubagentConfig struct {
+	ID                   string                 `json:"id"`
+	Name                 string                 `json:"name"`
+	Description          string                 `json:"description"`
+	Language             SubagentLanguage       `json:"language"`
+	InitScript           string                 `json:"initScript"`
+	EnvironmentVariables map[string]string      `json:"environmentVariables"`
+	ResourceLimits       ResourceLimits         `json:"resourceLimits"`
+	CustomConfig         map[string]interface{} `json:"customConfig"`
+}
+
+// SubagentInfo holds information about a subagent
+type SubagentInfo struct {
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	Description  string        `json:"description"`
+	Language     SubagentLanguage `json:"language"`
+	Status       SubagentStatus `json:"status"`
+	StartTime    time.Time     `json:"startTime"`
+	LastActivity time.Time     `json:"lastActivity"`
+	Error        string        `json:"error"`
+	ResourceUsage struct {
+		MemoryMB  float64 `json:"memoryMB"`
+		CPUPercent float64 `json:"cpuPercent"`
+		UptimeSeconds int64 `json:"uptimeSeconds"`
+	} `json:"resourceUsage"`
+}
+
+// Subagent interface defines the methods that all subagent implementations must provide
+type Subagent interface {
+	Initialize() error
+	Start() error
+	Stop() error
+	RunTool(ctx context.Context, toolName string, params map[string]interface{}) (interface{}, error)
+	Cleanup() error
+	IsRunning() bool
+	GetLastError() error
+	GetLastActivity() time.Time
+	GetConfig() interface{}
+}
+
+// SubagentManager manages subagents
+type SubagentManager struct {
+	subagents     map[string]Subagent
+	configs       map[string]SubagentConfig
+	workDir       string
+	mutex         sync.RWMutex
+	maxSubagents  int
+	resourceLimits ResourceLimits
+}
+
+// NewSubagentManager creates a new subagent manager
+func NewSubagentManager(workDir string, maxSubagents int, resourceLimits ResourceLimits) (*SubagentManager, error) {
+	// Create the work directory if it doesn't exist
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create work directory: %v", err)
+	}
+	
+	return &SubagentManager{
+		subagents:     make(map[string]Subagent),
+		configs:       make(map[string]SubagentConfig),
+		workDir:       workDir,
+		maxSubagents:  maxSubagents,
+		resourceLimits: resourceLimits,
+	}, nil
+}
+
+// CreateSubagent creates a new subagent
+func (m *SubagentManager) CreateSubagent(config SubagentConfig) (string, error) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	
+	// Check if we've reached the maximum number of subagents
+	if len(m.subagents) >= m.maxSubagents {
+		return "", fmt.Errorf("maximum number of subagents (%d) reached", m.maxSubagents)
+	}
+	
+	// Validate config
+	if config.Name == "" {
+		return "", fmt.Errorf("subagent name is required")
+	}
+	if config.Language == "" {
+		return "", fmt.Errorf("subagent language is required")
+	}
+	
+	// Generate ID if not provided
+	if config.ID == "" {
+		config.ID = fmt.Sprintf("%s-%d", config.Name, time.Now().UnixNano())
+	}
+	
+	// Check if ID already exists
+	if _, exists := m.subagents[config.ID]; exists {
+		return "", fmt.Errorf("subagent with ID %s already exists", config.ID)
+	}
+	
+	// Apply resource limits
+	if config.ResourceLimits.MemoryMB == 0 {
+		config.ResourceLimits.MemoryMB = m.resourceLimits.MemoryMB
+	}
+	if config.ResourceLimits.CPUCores == 0 {
+		config.ResourceLimits.CPUCores = m.resourceLimits.CPUCores
+	}
+	if config.ResourceLimits.TimeoutSec == 0 {
+		config.ResourceLimits.TimeoutSec = m.resourceLimits.TimeoutSec
+	}
+	
+	// Create subagent based on language
+	var subagent Subagent
+	var err error
+
+	switch config.Language {
+	case PythonLanguage:
+		subagent, err = NewSimpleSubagent(config)
+	case JavaScriptLanguage:
+		subagent, err = NewSimpleSubagent(config)
+	default:
+		return "", fmt.Errorf("unsupported language: %s", config.Language)
+	}
+	
+	if err != nil {
+		return "", fmt.Errorf("failed to create subagent: %v", err)
+	}
+	
+	// Store subagent and config
+	m.subagents[config.ID] = subagent
+	m.configs[config.ID] = config
+	
+	return config.ID, nil
+}
+
+// GetSubagent gets a subagent by ID
+func (m *SubagentManager) GetSubagent(id string) (Subagent, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	
+	subagent, ok := m.subagents[id]
+	if !ok {
+		return nil, fmt.Errorf("subagent %s not found", id)
+	}
+	
+	return subagent, nil
+}
+
+// GetSubagentInfo gets information about a subagent
+func (m *SubagentManager) GetSubagentInfo(id string) (*SubagentInfo, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	
+	subagent, ok := m.subagents[id]
+	if !ok {
+		return nil, fmt.Errorf("subagent %s not found", id)
+	}
+	
+	config, ok := m.configs[id]
+	if !ok {
+		return nil, fmt.Errorf("subagent config %s not found", id)
+	}
+	
+	// Determine status
+	var status SubagentStatus
+	var errorMsg string
+	
+	if subagent.IsRunning() {
+		status = SubagentStatusRunning
+	} else {
+		status = SubagentStatusStopped
+		if err := subagent.GetLastError(); err != nil {
+			status = SubagentStatusError
+			errorMsg = err.Error()
+		}
+	}
+	
+	// Create info
+	info := &SubagentInfo{
+		ID:          config.ID,
+		Name:        config.Name,
+		Description: config.Description,
+		Language:    config.Language,
+		Status:      status,
+		LastActivity: subagent.GetLastActivity(),
+		Error:       errorMsg,
+	}
+	
+	// TODO: Get resource usage
+	
+	return info, nil
+}
+
+// ListSubagents lists all subagents
+func (m *SubagentManager) ListSubagents() ([]*SubagentInfo, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	
+	infos := make([]*SubagentInfo, 0, len(m.subagents))
+	
+	for id := range m.subagents {
+		info, err := m.GetSubagentInfo(id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get subagent info: %v", err)
+		}
+		
+		infos = append(infos, info)
+	}
+	
+	return infos, nil
+}
+
+// StartSubagent starts a subagent
+func (m *SubagentManager) StartSubagent(id string) error {
+	m.mutex.RLock()
+	subagent, ok := m.subagents[id]
+	m.mutex.RUnlock()
+	
+	if !ok {
+		return fmt.Errorf("subagent %s not found", id)
+	}
+	
+	// Initialize and start the subagent
+	if err := subagent.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize subagent: %v", err)
+	}
+	
+	if err := subagent.Start(); err != nil {
+		return fmt.Errorf("failed to start subagent: %v", err)
+	}
+	
+	return nil
+}
+
+// StopSubagent stops a subagent
+func (m *SubagentManager) StopSubagent(id string) error {
+	m.mutex.RLock()
+	subagent, ok := m.subagents[id]
+	m.mutex.RUnlock()
+	
+	if !ok {
+		return fmt.Errorf("subagent %s not found", id)
+	}
+	
+	if err := subagent.Stop(); err != nil {
+		return fmt.Errorf("failed to stop subagent: %v", err)
+	}
+	
+	return nil
+}
+
+// DeleteSubagent deletes a subagent
+func (m *SubagentManager) DeleteSubagent(id string) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	
+	subagent, ok := m.subagents[id]
+	if !ok {
+		return fmt.Errorf("subagent %s not found", id)
+	}
+	
+	// Stop the subagent if it's running
+	if subagent.IsRunning() {
+		if err := subagent.Stop(); err != nil {
+			return fmt.Errorf("failed to stop subagent: %v", err)
+		}
+	}
+	
+	// Clean up resources
+	if err := subagent.Cleanup(); err != nil {
+		return fmt.Errorf("failed to clean up subagent: %v", err)
+	}
+	
+	// Remove from maps
+	delete(m.subagents, id)
+	delete(m.configs, id)
+	
+	return nil
+}
+
+// RunSubagentTool runs a tool in a subagent
+func (m *SubagentManager) RunSubagentTool(ctx context.Context, subagentID string, toolName string, params map[string]interface{}) (interface{}, error) {
+	m.mutex.RLock()
+	subagent, ok := m.subagents[subagentID]
+	m.mutex.RUnlock()
+	
+	if !ok {
+		return nil, fmt.Errorf("subagent %s not found", subagentID)
+	}
+	
+	if !subagent.IsRunning() {
+		return nil, fmt.Errorf("subagent %s is not running", subagentID)
+	}
+	
+	return subagent.RunTool(ctx, toolName, params)
+}
+
+// Cleanup cleans up all subagents
+func (m *SubagentManager) Cleanup() error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	
+	var errors []string
+	
+	for id, subagent := range m.subagents {
+		// Stop the subagent if it's running
+		if subagent.IsRunning() {
+			if err := subagent.Stop(); err != nil {
+				errors = append(errors, fmt.Sprintf("failed to stop subagent %s: %v", id, err))
+				continue
+			}
+		}
+		
+		// Clean up resources
+		if err := subagent.Cleanup(); err != nil {
+			errors = append(errors, fmt.Sprintf("failed to clean up subagent %s: %v", id, err))
+		}
+	}
+	
+	// Clear maps
+	m.subagents = make(map[string]Subagent)
+	m.configs = make(map[string]SubagentConfig)
+	
+	if len(errors) > 0 {
+		return fmt.Errorf("errors during cleanup: %v", errors)
+	}
+
+	return nil
+}
+
+// SimpleSubagent is a basic implementation of the Subagent interface
+type SimpleSubagent struct {
+	config       SubagentConfig
+	running      bool
+	lastError    error
+	lastActivity time.Time
+	mutex        sync.RWMutex
+}
+
+// NewSimpleSubagent creates a new simple subagent
+func NewSimpleSubagent(config SubagentConfig) (Subagent, error) {
+	return &SimpleSubagent{
+		config:       config,
+		running:      false,
+		lastActivity: time.Now(),
+	}, nil
+}
+
+// Initialize initializes the subagent
+func (s *SimpleSubagent) Initialize() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.lastActivity = time.Now()
+	return nil
+}
+
+// Start starts the subagent
+func (s *SimpleSubagent) Start() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.running = true
+	s.lastActivity = time.Now()
+	return nil
+}
+
+// Stop stops the subagent
+func (s *SimpleSubagent) Stop() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.running = false
+	s.lastActivity = time.Now()
+	return nil
+}
+
+// RunTool runs a tool in the subagent
+func (s *SimpleSubagent) RunTool(ctx context.Context, toolName string, params map[string]interface{}) (interface{}, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.lastActivity = time.Now()
+
+	// Simple tool execution simulation
+	result := fmt.Sprintf("Tool '%s' executed by subagent '%s' with params: %v", toolName, s.config.Name, params)
+	return result, nil
+}
+
+// Cleanup cleans up the subagent resources
+func (s *SimpleSubagent) Cleanup() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.running = false
+	s.lastActivity = time.Now()
+	return nil
+}
+
+// IsRunning returns whether the subagent is running
+func (s *SimpleSubagent) IsRunning() bool {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	return s.running
+}
+
+// GetLastError returns the last error
+func (s *SimpleSubagent) GetLastError() error {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	return s.lastError
+}
+
+// GetLastActivity returns the last activity time
+func (s *SimpleSubagent) GetLastActivity() time.Time {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	return s.lastActivity
+}
+
+// GetConfig returns the subagent configuration
+func (s *SimpleSubagent) GetConfig() interface{} {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	return s.config
+}

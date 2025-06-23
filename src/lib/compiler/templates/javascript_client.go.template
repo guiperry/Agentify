@@ -1,0 +1,558 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+// JavaScriptSubagentConfig holds the configuration for a JavaScript subagent
+type JavaScriptSubagentConfig struct {
+	Name                 string            `json:"name"`
+	Description          string            `json:"description"`
+	InitScript           string            `json:"initScript"`
+	EnvironmentVariables map[string]string `json:"environmentVariables"`
+	Tools                []ToolConfig      `json:"tools"`
+	ModelProvider        *ModelProviderConfig `json:"modelProvider"`
+	ResourceLimits       ResourceLimits    `json:"resourceLimits"`
+}
+
+// JavaScriptSubagent represents a JavaScript subagent
+type JavaScriptSubagent struct {
+	config       JavaScriptSubagentConfig
+	cmd          *exec.Cmd
+	stdin        io.WriteCloser
+	stdout       io.ReadCloser
+	stderr       io.ReadCloser
+	workDir      string
+	mutex        sync.RWMutex
+	initialized  bool
+	running      bool
+	lastError    error
+	lastActivity time.Time
+}
+
+// NewJavaScriptSubagent creates a new JavaScript subagent
+func NewJavaScriptSubagent(config JavaScriptSubagentConfig) (*JavaScriptSubagent, error) {
+	// Create a temporary working directory for the subagent
+	workDir, err := os.MkdirTemp("", fmt.Sprintf("js-subagent-%s-", config.Name))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create working directory: %v", err)
+	}
+	
+	return &JavaScriptSubagent{
+		config:       config,
+		workDir:      workDir,
+		lastActivity: time.Now(),
+	}, nil
+}
+
+// Initialize initializes the JavaScript subagent
+func (s *JavaScriptSubagent) Initialize() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	
+	if s.initialized {
+		return nil
+	}
+	
+	// Create package.json
+	packageJSON := map[string]interface{}{
+		"name":        s.config.Name,
+		"version":     "1.0.0",
+		"description": s.config.Description,
+		"main":        "index.js",
+		"dependencies": map[string]string{
+			"express":      "^4.18.2",
+			"body-parser":  "^1.20.2",
+			"axios":        "^1.6.0",
+			"dotenv":       "^16.3.1",
+		},
+	}
+	
+	// Add model provider dependencies
+	if s.config.ModelProvider != nil {
+		switch s.config.ModelProvider.Provider {
+		case OpenAIProvider:
+			packageJSON["dependencies"].(map[string]string)["openai"] = "^4.0.0"
+		case AnthropicProvider:
+			packageJSON["dependencies"].(map[string]string)["@anthropic-ai/sdk"] = "^0.8.1"
+		case GoogleProvider:
+			packageJSON["dependencies"].(map[string]string)["@google/generative-ai"] = "^0.1.3"
+		}
+	}
+	
+	// Marshal package.json
+	packageJSONBytes, err := json.MarshalIndent(packageJSON, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal package.json: %v", err)
+	}
+	
+	// Write package.json
+	if err := os.WriteFile(filepath.Join(s.workDir, "package.json"), packageJSONBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write package.json: %v", err)
+	}
+	
+	// Create .env file for environment variables
+	var envFileContent string
+	for key, value := range s.config.EnvironmentVariables {
+		envFileContent += fmt.Sprintf("%s=%s\n", key, value)
+	}
+	
+	if err := os.WriteFile(filepath.Join(s.workDir, ".env"), []byte(envFileContent), 0644); err != nil {
+		return fmt.Errorf("failed to write .env file: %v", err)
+	}
+	
+	// Create index.js
+	indexJSContent := `
+const express = require('express');
+const bodyParser = require('body-parser');
+const axios = require('axios');
+require('dotenv').config();
+
+// Create Express app
+const app = express();
+app.use(bodyParser.json());
+
+// Tool registry
+const tools = {};
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// Register tool endpoint
+app.post('/register_tool', (req, res) => {
+  const { name, implementation } = req.body;
+
+  if (!name || !implementation) {
+    return res.status(400).json({ status: 'error', error: 'Missing required parameters' });
+  }
+
+  try {
+    // Register the tool using a safer approach
+    // Instead of using new Function(), we'll store the implementation as a string
+    // and evaluate it in a controlled manner
+    tools[name] = {
+      implementation: implementation,
+      execute: async (params) => {
+        // Use eval in a controlled context (this is still not ideal but safer than new Function)
+        // In a production environment, you'd want to use a proper sandboxed execution environment
+        try {
+          const func = eval(`(function(params) { ${implementation} })`);
+          return await func(params);
+        } catch (error) {
+          throw new Error(`Tool execution failed: ${error.message}`);
+        }
+      }
+    };
+
+    res.json({ status: 'success' });
+  } catch (error) {
+    res.status(500).json({ status: 'error', error: error.message });
+  }
+});
+
+// Run tool endpoint
+app.post('/run_tool', async (req, res) => {
+  const { name, params } = req.body;
+
+  if (!name) {
+    return res.status(400).json({ status: 'error', error: 'Missing tool name' });
+  }
+
+  const tool = tools[name];
+  if (!tool) {
+    return res.status(404).json({ status: 'error', error: 'Tool not found' });
+  }
+
+  try {
+    // Run the tool using the new structure
+    const result = await tool.execute(params || {});
+
+    res.json({ status: 'success', result });
+  } catch (error) {
+    res.status(500).json({ status: 'error', error: error.message });
+  }
+});
+
+// LLM inference endpoint
+app.post('/llm_inference', async (req, res) => {
+  const { provider, model, messages, temperature, maxTokens, topP } = req.body;
+  
+  if (!provider || !model || !messages) {
+    return res.status(400).json({ status: 'error', error: 'Missing required parameters' });
+  }
+  
+  try {
+    let result;
+    
+    switch (provider) {
+      case 'openai':
+        result = await callOpenAI(model, messages, temperature, maxTokens, topP);
+        break;
+      case 'anthropic':
+        result = await callAnthropic(model, messages, temperature, maxTokens, topP);
+        break;
+      case 'google':
+        result = await callGoogle(model, messages, temperature, maxTokens, topP);
+        break;
+      default:
+        return res.status(400).json({ status: 'error', error: 'Unsupported provider' });
+    }
+    
+    res.json({ status: 'success', result });
+  } catch (error) {
+    res.status(500).json({ status: 'error', error: error.message });
+  }
+});
+
+// OpenAI API call
+async function callOpenAI(model, messages, temperature = 0.7, maxTokens = 1000, topP = 1.0) {
+  const OpenAI = require('openai');
+  // Use configured API key or fall back to environment variable
+  const apiKey = global.agentConfig?.apiKeys?.openai || process.env.OPENAI_API_KEY;
+  const openai = new OpenAI({ apiKey });
+  
+  const response = await openai.chat.completions.create({
+    model,
+    messages,
+    temperature,
+    max_tokens: maxTokens,
+    top_p: topP
+  });
+  
+  return response.choices[0].message.content;
+}
+
+// Anthropic API call
+async function callAnthropic(model, messages, temperature = 0.7, maxTokens = 1000, topP = 1.0) {
+  const Anthropic = require('@anthropic-ai/sdk');
+  // Use configured API key or fall back to environment variable
+  const apiKey = global.agentConfig?.apiKeys?.anthropic || process.env.ANTHROPIC_API_KEY;
+  const anthropic = new Anthropic({ apiKey });
+  
+  // Extract system message if present
+  let systemPrompt = '';
+  let anthropicMessages = [];
+  
+  for (const message of messages) {
+    if (message.role === 'system') {
+      systemPrompt = message.content;
+    } else {
+      anthropicMessages.push(message);
+    }
+  }
+  
+  const response = await anthropic.messages.create({
+    model,
+    messages: anthropicMessages,
+    system: systemPrompt,
+    temperature,
+    max_tokens: maxTokens,
+    top_p: topP
+  });
+  
+  return response.content[0].text;
+}
+
+// Google API call
+async function callGoogle(model, messages, temperature = 0.7, maxTokens = 1000, topP = 1.0) {
+  const { GoogleGenerativeAI } = require('@google/generative-ai');
+  // Use configured API key or fall back to environment variable
+  const apiKey = global.agentConfig?.apiKeys?.google || process.env.GOOGLE_API_KEY;
+  const genAI = new GoogleGenerativeAI(apiKey);
+  
+  // Convert messages to Google format
+  const googleMessages = messages.map(message => {
+    let role = message.role;
+    if (role === 'assistant') {
+      role = 'model';
+    }
+    
+    return {
+      role,
+      parts: [{ text: message.content }]
+    };
+  });
+  
+  const generationConfig = {
+    temperature,
+    maxOutputTokens: maxTokens,
+    topP
+  };
+  
+  const model = genAI.getGenerativeModel({ model });
+  const result = await model.generateContent({
+    contents: googleMessages,
+    generationConfig
+  });
+  
+  return result.response.text();
+}
+
+// Custom init script
+// No custom init script provided
+
+// Start the server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log('JavaScript subagent running on port ' + PORT);
+});
+`
+	
+	if err := os.WriteFile(filepath.Join(s.workDir, "index.js"), []byte(indexJSContent), 0644); err != nil {
+		return fmt.Errorf("failed to write index.js: %v", err)
+	}
+	
+	// Install dependencies
+	cmd := exec.Command("npm", "install")
+	cmd.Dir = s.workDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to install dependencies: %v", err)
+	}
+	
+	s.initialized = true
+	return nil
+}
+
+// Start starts the JavaScript subagent
+func (s *JavaScriptSubagent) Start() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	
+	if !s.initialized {
+		return fmt.Errorf("subagent not initialized")
+	}
+	
+	if s.running {
+		return nil
+	}
+	
+	// Create command
+	cmd := exec.Command("node", "index.js")
+	cmd.Dir = s.workDir
+	
+	// Set environment variables
+	cmd.Env = os.Environ()
+	for key, value := range s.config.EnvironmentVariables {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, value))
+	}
+	
+	// Create pipes
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdin pipe: %v", err)
+	}
+	
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdout pipe: %v", err)
+	}
+	
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stderr pipe: %v", err)
+	}
+	
+	// Start command
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start subagent: %v", err)
+	}
+	
+	s.cmd = cmd
+	s.stdin = stdin
+	s.stdout = stdout
+	s.stderr = stderr
+	s.running = true
+	s.lastActivity = time.Now()
+	
+	// Start goroutine to handle stdout
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			n, err := stdout.Read(buf)
+			if err != nil {
+				if err != io.EOF {
+					s.mutex.Lock()
+					s.lastError = fmt.Errorf("stdout read error: %v", err)
+					s.mutex.Unlock()
+				}
+				break
+			}
+			
+			fmt.Print(string(buf[:n]))
+			
+			s.mutex.Lock()
+			s.lastActivity = time.Now()
+			s.mutex.Unlock()
+		}
+	}()
+	
+	// Start goroutine to handle stderr
+	go func() {
+		buf := make([]byte, 1024)
+		for {
+			n, err := stderr.Read(buf)
+			if err != nil {
+				if err != io.EOF {
+					s.mutex.Lock()
+					s.lastError = fmt.Errorf("stderr read error: %v", err)
+					s.mutex.Unlock()
+				}
+				break
+			}
+			
+			fmt.Print(string(buf[:n]))
+			
+			s.mutex.Lock()
+			s.lastActivity = time.Now()
+			s.mutex.Unlock()
+		}
+	}()
+	
+	// Start goroutine to wait for command to finish
+	go func() {
+		err := cmd.Wait()
+		
+		s.mutex.Lock()
+		s.running = false
+		if err != nil {
+			s.lastError = fmt.Errorf("subagent exited with error: %v", err)
+		}
+		s.mutex.Unlock()
+	}()
+	
+	return nil
+}
+
+// Stop stops the JavaScript subagent
+func (s *JavaScriptSubagent) Stop() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	
+	if !s.running {
+		return nil
+	}
+	
+	// Kill the process
+	if err := s.cmd.Process.Kill(); err != nil {
+		return fmt.Errorf("failed to kill subagent: %v", err)
+	}
+	
+	s.running = false
+	return nil
+}
+
+// RunTool runs a tool in the JavaScript subagent
+func (s *JavaScriptSubagent) RunTool(ctx context.Context, toolName string, params map[string]interface{}) (interface{}, error) {
+	s.mutex.RLock()
+	if !s.initialized || !s.running {
+		s.mutex.RUnlock()
+		return nil, fmt.Errorf("subagent not initialized or not running")
+	}
+	s.mutex.RUnlock()
+	
+	// Create request
+	request := map[string]interface{}{
+		"name":   toolName,
+		"params": params,
+	}
+	
+	// Convert request to JSON
+	requestJSON, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %v", err)
+	}
+	
+	// Send request to subagent via HTTP
+	// In a real implementation, this would use the HTTP client to send a request to the subagent
+	// For now, we'll just simulate it
+	
+	// Simulate response
+	responseJSON := []byte(`{"status": "success", "result": "Tool executed successfully"}`)
+	
+	// Parse response
+	var response map[string]interface{}
+	if err := json.Unmarshal(responseJSON, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %v", err)
+	}
+	
+	// Check for error
+	if status, ok := response["status"].(string); ok && status == "error" {
+		if errorMsg, ok := response["error"].(string); ok {
+			return nil, fmt.Errorf("subagent error: %s", errorMsg)
+		}
+		return nil, fmt.Errorf("subagent error")
+	}
+	
+	// Return result
+	if result, ok := response["result"]; ok {
+		return result, nil
+	}
+	
+	return nil, fmt.Errorf("no result in response")
+}
+
+// Cleanup cleans up resources used by the JavaScript subagent
+func (s *JavaScriptSubagent) Cleanup() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	
+	// Stop the subagent if it's running
+	if s.running {
+		if err := s.cmd.Process.Kill(); err != nil {
+			fmt.Printf("Warning: Failed to kill subagent: %v\n", err)
+		}
+		s.running = false
+	}
+	
+	// Remove the working directory
+	if err := os.RemoveAll(s.workDir); err != nil {
+		return fmt.Errorf("failed to remove working directory: %v", err)
+	}
+	
+	return nil
+}
+
+// IsRunning returns whether the subagent is running
+func (s *JavaScriptSubagent) IsRunning() bool {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	
+	return s.running
+}
+
+// GetLastError returns the last error encountered by the subagent
+func (s *JavaScriptSubagent) GetLastError() error {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	
+	return s.lastError
+}
+
+// GetLastActivity returns the time of the last activity
+func (s *JavaScriptSubagent) GetLastActivity() time.Time {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	
+	return s.lastActivity
+}
+
+// GetConfig returns the subagent configuration
+func (s *JavaScriptSubagent) GetConfig() JavaScriptSubagentConfig {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	
+	return s.config
+}

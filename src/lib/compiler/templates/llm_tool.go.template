@@ -1,0 +1,112 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+// LLMGenerateTextTool is a tool for generating text using the LLM
+func LLMGenerateTextTool(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	// Parse parameters
+	promptRaw, ok := params["prompt"]
+	if !ok {
+		return nil, fmt.Errorf("missing required parameter: prompt")
+	}
+	
+	prompt, ok := promptRaw.(string)
+	if !ok {
+		return nil, fmt.Errorf("parameter prompt must be a string")
+	}
+	
+	// Get the agent plugin instance
+	plugin := &Plugin
+	
+	// Create a context with timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	
+	// Generate text
+	response, err := plugin.GenerateText(timeoutCtx, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("error generating text: %v", err)
+	}
+	
+	return map[string]interface{}{
+		"text": response,
+	}, nil
+}
+
+// LLMChatTool is a tool for chatting with the LLM
+func LLMChatTool(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+	// Parse parameters
+	messagesRaw, ok := params["messages"]
+	if !ok {
+		return nil, fmt.Errorf("missing required parameter: messages")
+	}
+	
+	messagesSlice, ok := messagesRaw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("parameter messages must be an array")
+	}
+	
+	// Convert messages to LLMMessage format
+	messages := make([]LLMMessage, 0, len(messagesSlice))
+	for _, msgRaw := range messagesSlice {
+		msgMap, ok := msgRaw.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("each message must be an object")
+		}
+		
+		roleRaw, ok := msgMap["role"]
+		if !ok {
+			return nil, fmt.Errorf("each message must have a role")
+		}
+		
+		role, ok := roleRaw.(string)
+		if !ok {
+			return nil, fmt.Errorf("message role must be a string")
+		}
+		
+		contentRaw, ok := msgMap["content"]
+		if !ok {
+			return nil, fmt.Errorf("each message must have content")
+		}
+		
+		content, ok := contentRaw.(string)
+		if !ok {
+			return nil, fmt.Errorf("message content must be a string")
+		}
+		
+		messages = append(messages, LLMMessage{
+			Role:    role,
+			Content: content,
+		})
+	}
+	
+	// Get the agent plugin instance
+	plugin := &Plugin
+	
+	// Create a context with timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	
+	// Generate text from messages
+	response, err := plugin.GenerateFromMessages(timeoutCtx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("error generating text: %v", err)
+	}
+	
+	return map[string]interface{}{
+		"text": response,
+	}, nil
+}
+
+// Register the LLM tools
+func init() {
+	// Register the LLM generate text tool
+	Plugin.RegisterTool("llm_generate_text", LLMGenerateTextTool)
+	
+	// Register the LLM chat tool
+	Plugin.RegisterTool("llm_chat", LLMChatTool)
+}

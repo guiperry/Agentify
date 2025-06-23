@@ -1,0 +1,1886 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/philippgille/chromem-go"
+)
+
+// AgentID is the unique identifier for this agent
+const AgentID = "{{.agentId}}"
+
+// AgentName is the human-readable name for this agent
+const AgentName = "{{.agentName}}"
+
+// AgentDescription is the description of this agent
+const AgentDescription = "{{.agentDescription}}"
+
+// AgentVersion is the version of this agent
+const AgentVersion = "{{.agentVersion}}"
+
+// AgentFacts information
+const (
+	FactsURL = "{{.factsUrl}}"
+	PrivateFactsURL = "{{.privateFactsUrl}}"
+	AdaptiveRouterURL = "{{.adaptiveRouterUrl}}"
+	TTL = {{.ttl}}
+	Signature = "{{.signature}}"
+)
+
+// TEE configuration
+const (
+	IsolationLevel = "{{.isolationLevel}}"
+	MemoryLimit = {{.memoryLimit}}
+	CPUCores = {{.cpuCores}}
+	TimeoutSec = {{.timeoutSec}}
+	NetworkAccess = {{.networkAccess}}
+	FileSystemAccess = {{.fileSystemAccess}}
+)
+
+// PythonAgentService manages the embedded Python agent service
+type PythonAgentService struct {
+	port       int
+	baseURL    string
+	tee        TEE
+	scriptPath string
+	reqPath    string
+}
+
+// NewPythonAgentService creates a new Python agent service
+func NewPythonAgentService(port int, tee TEE) (*PythonAgentService, error) {
+	// If port is 0, find a random available port
+	if port == 0 {
+		// In a real implementation, we would find an available port
+		port = 8000
+	}
+
+	return &PythonAgentService{
+		port:    port,
+		baseURL: fmt.Sprintf("http://localhost:%d", port),
+		tee:     tee,
+	}, nil
+}
+
+// extractPythonScript extracts the embedded Python script to the TEE
+func (s *PythonAgentService) extractPythonScript() error {
+	// Create a temporary file for the Python script
+	tempFile, err := os.CreateTemp("", "agent_service_*.py")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %v", err)
+	}
+	defer tempFile.Close()
+	
+	// Write the Python script to the file
+	if _, err := tempFile.Write([]byte(pythonAgentServiceScript)); err != nil {
+		return fmt.Errorf("failed to write Python script: %v", err)
+	}
+	
+	s.scriptPath = tempFile.Name()
+	
+	// Create a temporary file for the requirements
+	reqFile, err := os.CreateTemp("", "requirements_*.txt")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %v", err)
+	}
+	defer reqFile.Close()
+	
+	// Write the requirements to the file
+	if _, err := reqFile.Write([]byte(pythonRequirements)); err != nil {
+		return fmt.Errorf("failed to write requirements: %v", err)
+	}
+	
+	s.reqPath = reqFile.Name()
+	
+	// Copy the files to the TEE
+	if err := s.tee.CopyFileIn(s.scriptPath, "agent_service.py"); err != nil {
+		return fmt.Errorf("failed to copy Python script to TEE: %v", err)
+	}
+	
+	if err := s.tee.CopyFileIn(s.reqPath, "requirements.txt"); err != nil {
+		return fmt.Errorf("failed to copy requirements to TEE: %v", err)
+	}
+	
+	return nil
+}
+
+// Start starts the Python agent service within the TEE
+func (s *PythonAgentService) Start() error {
+	// Extract the Python script to the TEE
+	if err := s.extractPythonScript(); err != nil {
+		return err
+	}
+	
+	// Install dependencies within the TEE
+	_, stderr, exitCode, err := s.tee.Execute("pip", []string{"install", "-r", "requirements.txt"})
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to install Python dependencies: %v, exit code: %d, stderr: %s", err, exitCode, stderr)
+	}
+
+	// Start the Python service within the TEE
+	_, stderr, exitCode, err = s.tee.Execute("python", []string{"agent_service.py", fmt.Sprintf("--port=%d", s.port)})
+	if err != nil || exitCode != 0 {
+		return fmt.Errorf("failed to start Python service: %v, exit code: %d, stderr: %s", err, exitCode, stderr)
+	}
+	
+	// Wait for the service to start
+	for i := 0; i < 10; i++ {
+		resp, err := http.Get(fmt.Sprintf("%s/health", s.baseURL))
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resp.Body.Close()
+			return nil
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	
+	return fmt.Errorf("Python service failed to start")
+}
+
+// Stop stops the Python agent service
+func (s *PythonAgentService) Stop() error {
+	// Clean up temporary files
+	if s.scriptPath != "" {
+		os.Remove(s.scriptPath)
+	}
+	if s.reqPath != "" {
+		os.Remove(s.reqPath)
+	}
+	
+	// The TEE will handle stopping the Python process
+	return nil
+}
+
+// CreateAgent creates a new agent
+func (s *PythonAgentService) CreateAgent(config map[string]interface{}) (string, error) {
+	// Convert config to JSON
+	jsonData, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("error marshaling agent config: %v", err)
+	}
+	
+	// Send request to Python Agent Service
+	resp, err := http.Post(
+		fmt.Sprintf("%s/create_agent", s.baseURL),
+		"application/json",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		return "", fmt.Errorf("error creating agent: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	// Parse response
+	var result struct {
+		Status  string `json:"status"`
+		AgentID string `json:"agent_id"`
+		Error   string `json:"error,omitempty"`
+	}
+	
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("error parsing response: %v", err)
+	}
+	
+	if result.Status != "success" {
+		return "", fmt.Errorf("agent creation failed: %s", result.Error)
+	}
+	
+	return result.AgentID, nil
+}
+
+// RunAgent runs an agent with the given input
+func (s *PythonAgentService) RunAgent(agentID string, input string, sessionID string) (string, error) {
+	// Create request payload
+	payload := struct {
+		Input     string `json:"input"`
+		SessionID string `json:"session_id"`
+	}{
+		Input:     input,
+		SessionID: sessionID,
+	}
+	
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("error marshaling input: %v", err)
+	}
+	
+	// Send request to run the agent
+	resp, err := http.Post(
+		fmt.Sprintf("%s/run_agent/%s", s.baseURL, agentID),
+		"application/json",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		return "", fmt.Errorf("error running agent: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	// Parse response
+	var result struct {
+		Status   string `json:"status"`
+		Response string `json:"response"`
+		Error    string `json:"error,omitempty"`
+	}
+	
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("error parsing response: %v", err)
+	}
+	
+	if result.Status != "success" {
+		return "", fmt.Errorf("agent execution failed: %s", result.Error)
+	}
+	
+	return result.Response, nil
+}
+
+// OrchestrationPattern represents the different multi-agent orchestration patterns
+type OrchestrationPattern string
+
+const (
+	SingleAgentTools           OrchestrationPattern = "single_agent_tools"
+	SingleAgentMCPTools        OrchestrationPattern = "single_agent_mcp_tools"
+	SingleAgentRouter          OrchestrationPattern = "single_agent_router"
+	SingleAgentHumanInLoop     OrchestrationPattern = "single_agent_human_in_loop"
+	SingleAgentDynamicCall     OrchestrationPattern = "single_agent_dynamic_call"
+	SequentialAgents           OrchestrationPattern = "sequential_agents"
+	ParallelHierarchy          OrchestrationPattern = "parallel_hierarchy"
+	LoopParallelRAG            OrchestrationPattern = "loop_parallel_rag"
+)
+
+// OrchestrationStrategy holds information about an orchestration strategy
+type OrchestrationStrategy struct {
+	Pattern     OrchestrationPattern `json:"pattern"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	UseCase     string               `json:"use_case"`
+	Complexity  int                  `json:"complexity"` // 1-5 scale
+}
+
+// SubAgentInfo represents information about a spawned sub-agent
+type SubAgentInfo struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Role        string                 `json:"role"`
+	Status      string                 `json:"status"`
+	TerminalID  string                 `json:"terminal_id"`
+	CreatedAt   time.Time              `json:"created_at"`
+	LastActive  time.Time              `json:"last_active"`
+	Config      map[string]interface{} `json:"config"`
+}
+
+// AgentPlugin is the main entry point for the plugin
+// It implements the AgentPluginInterface with multi-agent orchestration capabilities
+type AgentPlugin struct {
+	config              map[string]interface{}
+	memory              *chromem.DB
+	pythonService       *PythonAgentService
+	embeddingClient     *DeterministicEmbeddingClient
+	tee                 TEE
+	teeConfig           TEEConfig
+	tools               map[string]ToolFunc
+	resources           map[string]interface{}
+	prompts             map[string]string
+	llmService          *LLMInferenceService
+	subagentManager     *SubagentManager
+	orchestrationEngine *OrchestrationEngine
+	subAgents           map[string]*SubAgentInfo
+	terminalManager     *TerminalManager
+	monitoringService   *AgentMonitoringService
+	strategies          []OrchestrationStrategy
+	mutex               sync.RWMutex
+	initialized         bool
+	running             bool
+}
+
+// ToolFunc represents a function that implements a tool
+type ToolFunc func(ctx context.Context, params map[string]interface{}) (interface{}, error)
+
+// TerminalSession represents an interactive terminal session for a sub-agent
+type TerminalSession struct {
+	ID          string    `json:"id"`
+	SubAgentID  string    `json:"sub_agent_id"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastActive  time.Time `json:"last_active"`
+	OutputBuffer []byte    `json:"-"`
+	mutex       sync.RWMutex
+}
+
+// TerminalManager manages terminal sessions for sub-agents
+type TerminalManager struct {
+	sessions map[string]*TerminalSession
+	mutex    sync.RWMutex
+}
+
+// NewTerminalManager creates a new terminal manager
+func NewTerminalManager() *TerminalManager {
+	return &TerminalManager{
+		sessions: make(map[string]*TerminalSession),
+	}
+}
+
+// CreateTerminalSession creates a new terminal session for a sub-agent
+func (tm *TerminalManager) CreateTerminalSession(subAgentID string) (*TerminalSession, error) {
+	tm.mutex.Lock()
+	defer tm.mutex.Unlock()
+
+	sessionID := fmt.Sprintf("terminal-%s-%d", subAgentID, time.Now().UnixNano())
+
+	session := &TerminalSession{
+		ID:         sessionID,
+		SubAgentID: subAgentID,
+		Status:     "active",
+		CreatedAt:  time.Now(),
+		LastActive: time.Now(),
+		OutputBuffer: make([]byte, 0),
+	}
+
+	tm.sessions[sessionID] = session
+	return session, nil
+}
+
+// WriteToTerminal writes output to a terminal session
+func (tm *TerminalManager) WriteToTerminal(sessionID string, data []byte) error {
+	tm.mutex.RLock()
+	session, exists := tm.sessions[sessionID]
+	tm.mutex.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("terminal session %s not found", sessionID)
+	}
+
+	session.mutex.Lock()
+	defer session.mutex.Unlock()
+
+	session.OutputBuffer = append(session.OutputBuffer, data...)
+	session.LastActive = time.Now()
+
+	return nil
+}
+
+// ReadFromTerminal reads output from a terminal session
+func (tm *TerminalManager) ReadFromTerminal(sessionID string) ([]byte, error) {
+	tm.mutex.RLock()
+	session, exists := tm.sessions[sessionID]
+	tm.mutex.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("terminal session %s not found", sessionID)
+	}
+
+	session.mutex.Lock()
+	defer session.mutex.Unlock()
+
+	// Return a copy of the buffer
+	data := make([]byte, len(session.OutputBuffer))
+	copy(data, session.OutputBuffer)
+
+	return data, nil
+}
+
+// GetTerminalSessions returns all terminal sessions for a sub-agent
+func (tm *TerminalManager) GetTerminalSessions(subAgentID string) []*TerminalSession {
+	tm.mutex.RLock()
+	defer tm.mutex.RUnlock()
+
+	var sessions []*TerminalSession
+	for _, session := range tm.sessions {
+		if session.SubAgentID == subAgentID {
+			sessions = append(sessions, session)
+		}
+	}
+
+	return sessions
+}
+
+// CloseTerminalSession closes a terminal session
+func (tm *TerminalManager) CloseTerminalSession(sessionID string) error {
+	tm.mutex.Lock()
+	defer tm.mutex.Unlock()
+
+	session, exists := tm.sessions[sessionID]
+	if !exists {
+		return fmt.Errorf("terminal session %s not found", sessionID)
+	}
+
+	session.Status = "closed"
+	delete(tm.sessions, sessionID)
+
+	return nil
+}
+
+// OrchestrationEngine manages the selection and execution of orchestration patterns
+type OrchestrationEngine struct {
+	agent      *AgentPlugin
+	strategies []OrchestrationStrategy
+	mutex      sync.RWMutex
+}
+
+// NewOrchestrationEngine creates a new orchestration engine
+func NewOrchestrationEngine(agent *AgentPlugin) *OrchestrationEngine {
+	strategies := []OrchestrationStrategy{
+		{
+			Pattern:     SingleAgentTools,
+			Name:        "Single Agent + Tools",
+			Description: "A simple agent using basic tools like Gmail to respond to user inputs",
+			UseCase:     "Simple tasks requiring basic tool usage",
+			Complexity:  1,
+		},
+		{
+			Pattern:     SingleAgentMCPTools,
+			Name:        "Single Agent + MCP Servers + Tools",
+			Description: "An agent enhanced by MCP servers for memory, execution, and coordination",
+			UseCase:     "Complex workflows requiring enhanced capabilities",
+			Complexity:  2,
+		},
+		{
+			Pattern:     SingleAgentRouter,
+			Name:        "Single Agent + Tools + Router",
+			Description: "The agent uses a router to decide which tools to use based on input type or context",
+			UseCase:     "Multi-domain tasks requiring intelligent tool selection",
+			Complexity:  2,
+		},
+		{
+			Pattern:     SingleAgentHumanInLoop,
+			Name:        "Single Agent + Human in the Loop + Tools",
+			Description: "A hybrid workflow where the agent collaborates with a human for approval or complex decisions",
+			UseCase:     "Critical tasks requiring human oversight and approval",
+			Complexity:  3,
+		},
+		{
+			Pattern:     SingleAgentDynamicCall,
+			Name:        "Single Agent + Dynamically Call Other Agents",
+			Description: "The main agent can summon other specialized agents on demand to complete specific tasks",
+			UseCase:     "Complex tasks requiring specialized expertise",
+			Complexity:  3,
+		},
+		{
+			Pattern:     SequentialAgents,
+			Name:        "Sequential Agents",
+			Description: "A chain of agents where the output of one feeds into the next",
+			UseCase:     "Multi-step workflows with clear sequential dependencies",
+			Complexity:  4,
+		},
+		{
+			Pattern:     ParallelHierarchy,
+			Name:        "Agents Hierarchy + Parallel Agents + Shared Tools",
+			Description: "Multiple agents run in parallel under a hierarchy, sharing tools and merging outputs",
+			UseCase:     "Complex parallel processing with coordination requirements",
+			Complexity:  4,
+		},
+		{
+			Pattern:     LoopParallelRAG,
+			Name:        "Agents Hierarchy + Loop + Parallel Agents + Shared RAG",
+			Description: "A complex system where agents loop through memory, call parallel agents, and share RAG",
+			UseCase:     "Advanced knowledge-intensive tasks requiring iterative refinement",
+			Complexity:  5,
+		},
+	}
+
+	return &OrchestrationEngine{
+		agent:      agent,
+		strategies: strategies,
+	}
+}
+
+// SelectOrchestrationPattern analyzes the input and selects the best orchestration pattern
+func (oe *OrchestrationEngine) SelectOrchestrationPattern(ctx context.Context, input string, sessionContext map[string]interface{}) (OrchestrationPattern, error) {
+	oe.mutex.RLock()
+	defer oe.mutex.RUnlock()
+
+	// Create a prompt for the LLM to analyze the input and select the best pattern
+	analysisPrompt := oe.buildAnalysisPrompt(input, sessionContext)
+
+	// Use the LLM to analyze and select the pattern
+	response, err := oe.agent.GenerateText(ctx, analysisPrompt)
+	if err != nil {
+		// Fallback to simple pattern selection based on keywords
+		return oe.fallbackPatternSelection(input), nil
+	}
+
+	// Parse the LLM response to extract the selected pattern
+	pattern := oe.parsePatternFromResponse(response)
+	if pattern == "" {
+		// Fallback if parsing fails
+		return oe.fallbackPatternSelection(input), nil
+	}
+
+	return OrchestrationPattern(pattern), nil
+}
+
+// buildAnalysisPrompt creates a prompt for pattern selection
+func (oe *OrchestrationEngine) buildAnalysisPrompt(input string, sessionContext map[string]interface{}) string {
+	prompt := `You are an expert in multi-agent orchestration patterns. Analyze the following user input and select the most appropriate orchestration pattern.
+
+Available Orchestration Patterns:
+`
+	for _, strategy := range oe.strategies {
+		prompt += fmt.Sprintf("- %s: %s (Complexity: %d/5)\n  Use Case: %s\n\n",
+			strategy.Pattern, strategy.Description, strategy.Complexity, strategy.UseCase)
+	}
+
+	prompt += fmt.Sprintf(`
+User Input: "%s"
+
+Session Context: %v
+
+Instructions:
+1. Analyze the complexity, scope, and requirements of the user's request
+2. Consider if the task requires human oversight, parallel processing, sequential steps, or specialized agents
+3. Select the most appropriate pattern based on the task requirements
+4. Respond with ONLY the pattern name (e.g., "single_agent_tools")
+
+Selected Pattern:`, input, sessionContext)
+
+	return prompt
+}
+
+// parsePatternFromResponse extracts the pattern from LLM response
+func (oe *OrchestrationEngine) parsePatternFromResponse(response string) string {
+	response = strings.ToLower(strings.TrimSpace(response))
+
+	// Check for each pattern in the response
+	for _, strategy := range oe.strategies {
+		if strings.Contains(response, string(strategy.Pattern)) {
+			return string(strategy.Pattern)
+		}
+	}
+
+	return ""
+}
+
+// fallbackPatternSelection provides a simple keyword-based fallback
+func (oe *OrchestrationEngine) fallbackPatternSelection(input string) OrchestrationPattern {
+	input = strings.ToLower(input)
+
+	// Complex multi-step or parallel processing indicators
+	if strings.Contains(input, "parallel") || strings.Contains(input, "simultaneously") {
+		return ParallelHierarchy
+	}
+
+	// Sequential processing indicators
+	if strings.Contains(input, "step by step") || strings.Contains(input, "then") || strings.Contains(input, "after") {
+		return SequentialAgents
+	}
+
+	// Human approval indicators
+	if strings.Contains(input, "approve") || strings.Contains(input, "review") || strings.Contains(input, "confirm") {
+		return SingleAgentHumanInLoop
+	}
+
+	// Specialized task indicators
+	if strings.Contains(input, "expert") || strings.Contains(input, "specialist") || strings.Contains(input, "analyze") {
+		return SingleAgentDynamicCall
+	}
+
+	// Research or knowledge-intensive indicators
+	if strings.Contains(input, "research") || strings.Contains(input, "knowledge") || strings.Contains(input, "learn") {
+		return LoopParallelRAG
+	}
+
+	// Default to simple pattern
+	return SingleAgentTools
+}
+
+// ExecuteOrchestrationPattern executes the selected orchestration pattern
+func (oe *OrchestrationEngine) ExecuteOrchestrationPattern(ctx context.Context, pattern OrchestrationPattern, input string, sessionID string) (string, error) {
+	switch pattern {
+	case SingleAgentTools:
+		return oe.executeSingleAgentTools(ctx, input, sessionID)
+	case SingleAgentMCPTools:
+		return oe.executeSingleAgentMCPTools(ctx, input, sessionID)
+	case SingleAgentRouter:
+		return oe.executeSingleAgentRouter(ctx, input, sessionID)
+	case SingleAgentHumanInLoop:
+		return oe.executeSingleAgentHumanInLoop(ctx, input, sessionID)
+	case SingleAgentDynamicCall:
+		return oe.executeSingleAgentDynamicCall(ctx, input, sessionID)
+	case SequentialAgents:
+		return oe.executeSequentialAgents(ctx, input, sessionID)
+	case ParallelHierarchy:
+		return oe.executeParallelHierarchy(ctx, input, sessionID)
+	case LoopParallelRAG:
+		return oe.executeLoopParallelRAG(ctx, input, sessionID)
+	default:
+		return oe.executeSingleAgentTools(ctx, input, sessionID)
+	}
+}
+
+// executeSingleAgentTools implements the simple single agent + tools pattern
+func (oe *OrchestrationEngine) executeSingleAgentTools(ctx context.Context, input string, sessionID string) (string, error) {
+	// Use the existing Python service to process the request
+	return oe.agent.pythonService.RunAgent(AgentID, input, sessionID)
+}
+
+// executeSingleAgentMCPTools implements single agent enhanced with MCP servers
+func (oe *OrchestrationEngine) executeSingleAgentMCPTools(ctx context.Context, input string, sessionID string) (string, error) {
+	// Enhanced prompt with MCP server capabilities
+	enhancedPrompt := fmt.Sprintf(`You are an enhanced agent with access to MCP (Model Context Protocol) servers for memory, execution, and coordination.
+
+Available MCP capabilities:
+- Memory management and persistence
+- Code execution environments
+- External service coordination
+- Enhanced tool orchestration
+
+User request: %s
+
+Process this request using your enhanced MCP capabilities.`, input)
+
+	return oe.agent.GenerateText(ctx, enhancedPrompt)
+}
+
+// executeSingleAgentRouter implements router-based tool selection
+func (oe *OrchestrationEngine) executeSingleAgentRouter(ctx context.Context, input string, sessionID string) (string, error) {
+	// First, route to determine which tools to use
+	routingPrompt := fmt.Sprintf(`You are a routing agent. Analyze the following request and determine which tools should be used:
+
+Available tools: %v
+
+User request: %s
+
+Respond with a JSON array of tool names that should be used to fulfill this request.`, oe.getAvailableToolNames(), input)
+
+	routingResponse, err := oe.agent.GenerateText(ctx, routingPrompt)
+	if err != nil {
+		return "", fmt.Errorf("routing failed: %v", err)
+	}
+
+	// Execute with selected tools
+	executionPrompt := fmt.Sprintf(`Using the selected tools (%s), process the following request:
+
+%s`, routingResponse, input)
+
+	return oe.agent.GenerateText(ctx, executionPrompt)
+}
+
+// executeSingleAgentHumanInLoop implements human-in-the-loop workflow
+func (oe *OrchestrationEngine) executeSingleAgentHumanInLoop(ctx context.Context, input string, sessionID string) (string, error) {
+	// Generate initial analysis and plan
+	planPrompt := fmt.Sprintf(`Analyze the following request and create a plan that requires human approval:
+
+User request: %s
+
+Provide:
+1. Analysis of the request
+2. Proposed action plan
+3. Specific points that need human approval
+4. Risk assessment
+
+Format your response to clearly indicate what needs human review.`, input)
+
+	plan, err := oe.agent.GenerateText(ctx, planPrompt)
+	if err != nil {
+		return "", fmt.Errorf("planning failed: %v", err)
+	}
+
+	// Return plan with human approval request
+	return fmt.Sprintf(`HUMAN APPROVAL REQUIRED
+
+%s
+
+Please review the above plan and provide approval or modifications before proceeding.`, plan), nil
+}
+
+// executeSingleAgentDynamicCall implements dynamic sub-agent calling
+func (oe *OrchestrationEngine) executeSingleAgentDynamicCall(ctx context.Context, input string, sessionID string) (string, error) {
+	// Analyze what specialized agents are needed
+	analysisPrompt := fmt.Sprintf(`Analyze the following request and determine what specialized sub-agents should be created:
+
+User request: %s
+
+For each needed sub-agent, specify:
+1. Agent role/specialty
+2. Specific task for this agent
+3. Required tools/capabilities
+
+Respond in JSON format with an array of sub-agent specifications.`, input)
+
+	analysis, err := oe.agent.GenerateText(ctx, analysisPrompt)
+	if err != nil {
+		return "", fmt.Errorf("sub-agent analysis failed: %v", err)
+	}
+
+	// Spawn and coordinate sub-agents
+	return oe.spawnAndCoordinateSubAgents(ctx, analysis, input, sessionID)
+}
+
+// executeSequentialAgents implements sequential agent workflow
+func (oe *OrchestrationEngine) executeSequentialAgents(ctx context.Context, input string, sessionID string) (string, error) {
+	// Break down the task into sequential steps
+	planPrompt := fmt.Sprintf(`Break down the following request into sequential steps that can be handled by different agents:
+
+User request: %s
+
+For each step, specify:
+1. Step number and description
+2. Input requirements
+3. Expected output
+4. Dependencies on previous steps
+
+Respond with a clear sequential plan.`, input)
+
+	plan, err := oe.agent.GenerateText(ctx, planPrompt)
+	if err != nil {
+		return "", fmt.Errorf("sequential planning failed: %v", err)
+	}
+
+	// Execute steps sequentially
+	return oe.executeSequentialSteps(ctx, plan, input, sessionID)
+}
+
+// executeParallelHierarchy implements parallel agent hierarchy
+func (oe *OrchestrationEngine) executeParallelHierarchy(ctx context.Context, input string, sessionID string) (string, error) {
+	// Create parallel processing plan
+	planPrompt := fmt.Sprintf(`Create a parallel processing plan for the following request:
+
+User request: %s
+
+Design a hierarchy where:
+1. Multiple agents can work in parallel
+2. Agents share tools and resources
+3. Results are merged effectively
+4. There's clear coordination
+
+Specify the parallel agent structure and coordination strategy.`, input)
+
+	plan, err := oe.agent.GenerateText(ctx, planPrompt)
+	if err != nil {
+		return "", fmt.Errorf("parallel planning failed: %v", err)
+	}
+
+	// Execute parallel processing
+	return oe.executeParallelProcessing(ctx, plan, input, sessionID)
+}
+
+// executeLoopParallelRAG implements the most complex pattern
+func (oe *OrchestrationEngine) executeLoopParallelRAG(ctx context.Context, input string, sessionID string) (string, error) {
+	// Create complex iterative plan with RAG
+	planPrompt := fmt.Sprintf(`Create an advanced iterative processing plan with RAG for:
+
+User request: %s
+
+Design a system that:
+1. Uses iterative loops for refinement
+2. Employs parallel agents for different aspects
+3. Leverages shared RAG for knowledge
+4. Includes memory and learning components
+5. Has feedback loops for improvement
+
+Provide a comprehensive execution strategy.`, input)
+
+	plan, err := oe.agent.GenerateText(ctx, planPrompt)
+	if err != nil {
+		return "", fmt.Errorf("complex planning failed: %v", err)
+	}
+
+	// Execute complex iterative processing
+	return oe.executeComplexIterativeProcessing(ctx, plan, input, sessionID)
+}
+
+// Helper methods for orchestration execution
+
+// getAvailableToolNames returns a list of available tool names
+func (oe *OrchestrationEngine) getAvailableToolNames() []string {
+	oe.agent.mutex.RLock()
+	defer oe.agent.mutex.RUnlock()
+
+	var toolNames []string
+	for name := range oe.agent.tools {
+		toolNames = append(toolNames, name)
+	}
+	return toolNames
+}
+
+// spawnAndCoordinateSubAgents spawns sub-agents and coordinates their execution
+func (oe *OrchestrationEngine) spawnAndCoordinateSubAgents(ctx context.Context, analysis, input, sessionID string) (string, error) {
+	// Parse the analysis to extract sub-agent specifications
+	// For demonstration, create some example sub-agents
+	subAgentRoles := []string{"researcher", "analyzer", "coordinator"}
+
+	var spawnedAgents []*SubAgentInfo
+	var results []string
+
+	// Spawn sub-agents
+	for _, role := range subAgentRoles {
+		config := map[string]interface{}{
+			"role": role,
+			"task": input,
+			"sessionID": sessionID,
+		}
+
+		subAgent, err := oe.agent.SpawnSubAgent(ctx, role, fmt.Sprintf("%s-agent", role), config)
+		if err != nil {
+			oe.agent.LogSubAgentActivity("main", fmt.Sprintf("Failed to spawn %s sub-agent: %v", role, err))
+			continue
+		}
+
+		spawnedAgents = append(spawnedAgents, subAgent)
+		oe.agent.LogSubAgentActivity(subAgent.ID, fmt.Sprintf("Sub-agent %s spawned for task: %s", role, input))
+
+		// Simulate sub-agent processing
+		roleResult := oe.simulateSubAgentWork(ctx, subAgent, input)
+		results = append(results, roleResult)
+
+		oe.agent.LogSubAgentActivity(subAgent.ID, fmt.Sprintf("Completed task with result: %s", roleResult))
+	}
+
+	// Coordinate results
+	coordinationPrompt := fmt.Sprintf(`Based on the sub-agent analysis:
+
+%s
+
+Sub-agent results:
+%s
+
+Coordinate and synthesize these results for the original request:
+%s
+
+Provide a comprehensive response that integrates the work of all specialized agents.`, analysis, strings.Join(results, "\n"), input)
+
+	finalResult, err := oe.agent.GenerateText(ctx, coordinationPrompt)
+	if err != nil {
+		return "", err
+	}
+
+	// Log final coordination
+	for _, subAgent := range spawnedAgents {
+		oe.agent.LogSubAgentActivity(subAgent.ID, "Task coordination completed")
+	}
+
+	return finalResult, nil
+}
+
+// simulateSubAgentWork simulates work being done by a sub-agent
+func (oe *OrchestrationEngine) simulateSubAgentWork(ctx context.Context, subAgent *SubAgentInfo, input string) string {
+	role := subAgent.Role
+
+	switch role {
+	case "researcher":
+		oe.agent.LogSubAgentActivity(subAgent.ID, "Starting research phase...")
+		return fmt.Sprintf("Research findings for '%s': Gathered relevant information and context", input)
+	case "analyzer":
+		oe.agent.LogSubAgentActivity(subAgent.ID, "Starting analysis phase...")
+		return fmt.Sprintf("Analysis results for '%s': Identified key patterns and insights", input)
+	case "coordinator":
+		oe.agent.LogSubAgentActivity(subAgent.ID, "Starting coordination phase...")
+		return fmt.Sprintf("Coordination summary for '%s': Organized workflow and dependencies", input)
+	default:
+		oe.agent.LogSubAgentActivity(subAgent.ID, "Starting general processing...")
+		return fmt.Sprintf("General processing result for '%s': Completed assigned task", input)
+	}
+}
+
+// executeSequentialSteps executes steps in sequence
+func (oe *OrchestrationEngine) executeSequentialSteps(ctx context.Context, plan, input, sessionID string) (string, error) {
+	// Create a sequential coordinator sub-agent
+	coordinatorConfig := map[string]interface{}{
+		"role": "sequential-coordinator",
+		"plan": plan,
+		"sessionID": sessionID,
+	}
+
+	coordinator, err := oe.agent.SpawnSubAgent(ctx, "sequential-coordinator", "seq-coordinator", coordinatorConfig)
+	if err != nil {
+		return "", fmt.Errorf("failed to spawn sequential coordinator: %v", err)
+	}
+
+	oe.agent.LogSubAgentActivity(coordinator.ID, "Starting sequential execution plan")
+	oe.agent.LogSubAgentActivity(coordinator.ID, fmt.Sprintf("Plan: %s", plan))
+
+	// Simulate sequential step execution
+	steps := []string{"Step 1: Analysis", "Step 2: Processing", "Step 3: Synthesis"}
+	for _, step := range steps {
+		oe.agent.LogSubAgentActivity(coordinator.ID, fmt.Sprintf("Executing %s", step))
+		time.Sleep(100 * time.Millisecond) // Simulate processing time
+		oe.agent.LogSubAgentActivity(coordinator.ID, fmt.Sprintf("Completed %s", step))
+	}
+
+	executionPrompt := fmt.Sprintf(`Execute the following sequential plan:
+
+%s
+
+For the original request: %s
+
+Process each step in order and provide the final result.`, plan, input)
+
+	result, err := oe.agent.GenerateText(ctx, executionPrompt)
+	if err != nil {
+		oe.agent.LogSubAgentActivity(coordinator.ID, fmt.Sprintf("Execution failed: %v", err))
+		return "", err
+	}
+
+	oe.agent.LogSubAgentActivity(coordinator.ID, "Sequential execution completed successfully")
+	return result, nil
+}
+
+// executeParallelProcessing executes parallel agent processing
+func (oe *OrchestrationEngine) executeParallelProcessing(ctx context.Context, plan, input, sessionID string) (string, error) {
+	// Create multiple parallel processing sub-agents
+	parallelRoles := []string{"processor-1", "processor-2", "processor-3"}
+	var parallelAgents []*SubAgentInfo
+
+	// Spawn parallel agents
+	for _, role := range parallelRoles {
+		config := map[string]interface{}{
+			"role": role,
+			"plan": plan,
+			"sessionID": sessionID,
+		}
+
+		agent, err := oe.agent.SpawnSubAgent(ctx, role, fmt.Sprintf("parallel-%s", role), config)
+		if err != nil {
+			continue
+		}
+
+		parallelAgents = append(parallelAgents, agent)
+		oe.agent.LogSubAgentActivity(agent.ID, fmt.Sprintf("Starting parallel processing for: %s", input))
+	}
+
+	// Simulate parallel execution
+	var wg sync.WaitGroup
+	for _, agent := range parallelAgents {
+		wg.Add(1)
+		go func(a *SubAgentInfo) {
+			defer wg.Done()
+			oe.agent.LogSubAgentActivity(a.ID, "Processing in parallel...")
+			time.Sleep(200 * time.Millisecond) // Simulate processing
+			oe.agent.LogSubAgentActivity(a.ID, "Parallel processing completed")
+		}(agent)
+	}
+
+	// Wait for all parallel agents to complete
+	wg.Wait()
+
+	// Merge results
+	for _, agent := range parallelAgents {
+		oe.agent.LogSubAgentActivity(agent.ID, "Results merged into final output")
+	}
+
+	executionPrompt := fmt.Sprintf(`Execute the following parallel processing plan:
+
+%s
+
+For the original request: %s
+
+Simulate parallel execution and merge the results effectively.`, plan, input)
+
+	return oe.agent.GenerateText(ctx, executionPrompt)
+}
+
+// executeComplexIterativeProcessing executes complex iterative processing with RAG
+func (oe *OrchestrationEngine) executeComplexIterativeProcessing(ctx context.Context, plan, input, sessionID string) (string, error) {
+	executionPrompt := fmt.Sprintf(`Execute the following complex iterative processing plan with RAG:
+
+%s
+
+For the original request: %s
+
+Simulate iterative refinement with knowledge retrieval and parallel processing.`, plan, input)
+
+	return oe.agent.GenerateText(ctx, executionPrompt)
+}
+
+// Sub-agent management methods
+
+// SpawnSubAgent creates a new sub-agent within the TEE
+func (ap *AgentPlugin) SpawnSubAgent(ctx context.Context, role, name string, config map[string]interface{}) (*SubAgentInfo, error) {
+	ap.mutex.Lock()
+	defer ap.mutex.Unlock()
+
+	// Generate unique ID for the sub-agent
+	subAgentID := fmt.Sprintf("%s-%s-%d", role, name, time.Now().UnixNano())
+
+	// Create terminal session for the sub-agent
+	terminalSession, err := ap.terminalManager.CreateTerminalSession(subAgentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create terminal session: %v", err)
+	}
+	terminalID := terminalSession.ID
+
+	// Create sub-agent configuration
+	subAgentConfig := SubagentConfig{
+		ID:          subAgentID,
+		Name:        name,
+		Description: fmt.Sprintf("Sub-agent for %s role", role),
+		Language:    PythonLanguage, // Default to Python
+		InitScript:  ap.generateSubAgentScript(role, config),
+		EnvironmentVariables: map[string]string{
+			"SUBAGENT_ROLE": role,
+			"SUBAGENT_ID":   subAgentID,
+			"TERMINAL_ID":   terminalID,
+		},
+		ResourceLimits: ResourceLimits{
+			MemoryMB:   256, // Smaller resource allocation for sub-agents
+			CPUCores:   1,
+			TimeoutSec: 120,
+		},
+		CustomConfig: config,
+	}
+
+	// Create the sub-agent using the subagent manager
+	_, createErr := ap.subagentManager.CreateSubagent(subAgentConfig)
+	if createErr != nil {
+		return nil, fmt.Errorf("failed to create sub-agent: %v", createErr)
+	}
+
+	// Start the sub-agent
+	if err := ap.subagentManager.StartSubagent(subAgentID); err != nil {
+		return nil, fmt.Errorf("failed to start sub-agent: %v", err)
+	}
+
+	// Create sub-agent info
+	subAgentInfo := &SubAgentInfo{
+		ID:         subAgentID,
+		Name:       name,
+		Role:       role,
+		Status:     "running",
+		TerminalID: terminalID,
+		CreatedAt:  time.Now(),
+		LastActive: time.Now(),
+		Config:     config,
+	}
+
+	// Store sub-agent info
+	ap.subAgents[subAgentID] = subAgentInfo
+
+	// Register sub-agent for monitoring
+	ap.monitoringService.RegisterAgent(subAgentID, "sub", AgentID)
+	ap.monitoringService.UpdateAgentStatus(subAgentID, "running")
+	ap.monitoringService.UpdateSubAgentCount(AgentID, len(ap.subAgents))
+
+	// Log sub-agent creation
+	ap.monitoringService.LogActivity(AgentID, "info", fmt.Sprintf("Sub-agent spawned: %s (%s)", name, role), "subagent", map[string]interface{}{
+		"sub_agent_id": subAgentID,
+		"role":         role,
+		"name":         name,
+	})
+
+	return subAgentInfo, nil
+}
+
+// generateSubAgentScript generates initialization script for sub-agents
+func (ap *AgentPlugin) generateSubAgentScript(role string, config map[string]interface{}) string {
+	script := fmt.Sprintf(`#!/usr/bin/env python3
+"""
+Sub-agent for role: %s
+Generated at: %s
+"""
+
+import os
+import sys
+import json
+import time
+import logging
+from typing import Dict, Any
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='[SUB-AGENT-%s] %%(asctime)s - %%(levelname)s - %%(message)s'
+)
+logger = logging.getLogger(__name__)
+
+class SubAgent:
+    def __init__(self):
+        self.role = "%s"
+        self.agent_id = os.environ.get('SUBAGENT_ID', 'unknown')
+        self.terminal_id = os.environ.get('TERMINAL_ID', 'unknown')
+        self.config = %s
+        logger.info(f"Sub-agent initialized with role: {self.role}")
+
+    def process_task(self, task: str) -> str:
+        """Process a task specific to this sub-agent's role"""
+        logger.info(f"Processing task: {task}")
+
+        # Role-specific processing logic would go here
+        result = f"Sub-agent {self.role} processed: {task}"
+
+        logger.info(f"Task completed: {result}")
+        return result
+
+    def run(self):
+        """Main execution loop for the sub-agent"""
+        logger.info(f"Sub-agent {self.role} starting execution")
+
+        # Keep the sub-agent running and responsive
+        while True:
+            try:
+                # In a real implementation, this would listen for tasks
+                time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Sub-agent shutting down")
+                break
+
+if __name__ == "__main__":
+    sub_agent = SubAgent()
+    sub_agent.run()
+`, role, time.Now().Format(time.RFC3339), role, role, ap.configToJSON(config))
+
+	return script
+}
+
+// configToJSON converts config to JSON string
+func (ap *AgentPlugin) configToJSON(config map[string]interface{}) string {
+	if config == nil {
+		return "{}"
+	}
+
+	jsonBytes, err := json.Marshal(config)
+	if err != nil {
+		return "{}"
+	}
+
+	return string(jsonBytes)
+}
+
+// NewAgentPlugin creates a new agent plugin
+func NewAgentPlugin() (*AgentPlugin, error) {
+	plugin := &AgentPlugin{
+		tools:             make(map[string]ToolFunc),
+		resources:         make(map[string]interface{}),
+		prompts:           make(map[string]string),
+		subAgents:         make(map[string]*SubAgentInfo),
+		terminalManager:   NewTerminalManager(),
+		monitoringService: NewAgentMonitoringService(),
+		initialized:       false,
+		running:           false,
+	}
+
+	// Initialize orchestration engine
+	plugin.orchestrationEngine = NewOrchestrationEngine(plugin)
+
+	return plugin, nil
+}
+
+// Initialize initializes the agent with configuration
+func (p *AgentPlugin) Initialize(config map[string]interface{}) error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	
+	if p.initialized {
+		return nil
+	}
+	
+	p.config = config
+	
+	// Initialize deterministic embedding client
+	// API key is kept for compatibility but not used in deterministic mode
+	embeddingAPIKey := os.Getenv("EMBEDDING_API_KEY")
+	if embeddingAPIKey == "" {
+		// Default placeholder key for compatibility
+		embeddingAPIKey = "deterministic-embeddings-no-api-key-needed"
+	}
+
+	p.embeddingClient = NewDeterministicEmbeddingClient(embeddingAPIKey)
+
+	// Create the memory manager using chromem-go with deterministic embeddings
+	embeddingFunc := CreateDeterministicEmbeddingFunction(embeddingAPIKey)
+	memory := chromem.NewDB()
+
+	// Note: In a full implementation, you would use embeddingFunc with chromem.NewDB()
+	// For now, we store the embedding function for future use
+	_ = embeddingFunc // Prevent unused variable error
+
+	p.memory = memory
+	
+	// Configure the TEE
+	teeConfig := TEEConfig{
+		IsolationLevel:   "{{.isolationLevel}}", // Will be replaced with the actual value from config
+		ResourceLimits: ResourceLimits{
+			MemoryMB:   {{.memoryLimit}},        // Will be replaced with the actual value from config
+			CPUCores:   {{.cpuCores}},           // Will be replaced with the actual value from config
+			TimeoutSec: {{.timeoutSec}},         // Will be replaced with the actual value from config
+		},
+		NetworkAccess:    {{.networkAccess}},    // Will be replaced with the actual value from config
+		FileSystemAccess: {{.fileSystemAccess}}, // Will be replaced with the actual value from config
+		EnvVars:          map[string]string{},  // Will be populated based on config
+		WorkingDir:       "",                   // Will use a temporary directory by default
+	}
+	p.teeConfig = teeConfig
+	
+	// Create the TEE
+	tee, err := TEEFactory(teeConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create TEE: %v", err)
+	}
+	p.tee = tee
+
+	// Initialize sub-agent manager
+	subagentManager, err := NewSubagentManager(
+		"/tmp/subagents", // Work directory for sub-agents
+		10,               // Maximum number of sub-agents
+		ResourceLimits{   // Default resource limits for sub-agents
+			MemoryMB:   256,
+			CPUCores:   1,
+			TimeoutSec: 120,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create sub-agent manager: %v", err)
+	}
+	p.subagentManager = subagentManager
+	
+	// Initialize LLM inference service if model provider is configured
+	if modelProviderConfig, ok := config["modelProvider"].(map[string]interface{}); ok {
+		provider, _ := modelProviderConfig["provider"].(string)
+		model, _ := modelProviderConfig["model"].(string)
+
+		// Get API key from configuration, environment variable, or use default
+		var apiKey string
+
+		// First try to get from configuration
+		if apiKeysConfig, ok := config["apiKeys"].(map[string]interface{}); ok {
+			if key, ok := apiKeysConfig[strings.ToLower(provider)].(string); ok && key != "" {
+				apiKey = key
+			}
+		}
+
+		// If not in config, try environment variable
+		if apiKey == "" {
+			apiKeyEnvVar := fmt.Sprintf("%s_API_KEY", strings.ToUpper(provider))
+			apiKey = os.Getenv(apiKeyEnvVar)
+		}
+
+		// Default Cerebras API key for inference (embeddings use deterministic approach)
+		if apiKey == "" && provider == "cerebras" {
+			apiKey = "csk-j99xk9m6kr5x5nfmkwdrm3jmctwh6eh3pvcm9ymmy293emhp"
+		}
+
+		if apiKey == "" {
+			fmt.Printf("Warning: API key for %s not found in configuration or environment variable\n", provider)
+		}
+		
+		// Get parameters
+		var temperature float64 = 0.7
+		var maxTokens int = 1000
+		var topP float64 = 1.0
+		
+		if params, ok := modelProviderConfig["parameters"].(map[string]interface{}); ok {
+			if temp, ok := params["temperature"].(float64); ok {
+				temperature = temp
+			}
+			if tokens, ok := params["maxTokens"].(float64); ok {
+				maxTokens = int(tokens)
+			}
+			if tp, ok := params["topP"].(float64); ok {
+				topP = tp
+			}
+		}
+		
+		// Create LLM config
+		llmConfig := LLMConfig{
+			Provider:    LLMProvider(provider),
+			Model:       model,
+			APIKey:      apiKey,
+			Temperature: temperature,
+			MaxTokens:   maxTokens,
+			TopP:        topP,
+			Parameters:  make(map[string]any),
+		}
+		
+		// Initialize LLM service
+		llmService, err := NewLLMInferenceService(llmConfig)
+		if err != nil {
+			return fmt.Errorf("failed to initialize LLM inference service: %v", err)
+		}
+		
+		p.llmService = llmService
+	}
+	
+	// Register tools
+	tools, ok := config["tools"].([]interface{})
+	if ok {
+		for _, toolConfig := range tools {
+			toolMap, ok := toolConfig.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			
+			name, _ := toolMap["name"].(string)
+			sourceType, _ := toolMap["sourceType"].(string)
+			sourceValue, _ := toolMap["sourceValue"].(string)
+			
+			// Register the tool
+			p.RegisterTool(name, func(ctx context.Context, params map[string]interface{}) (interface{}, error) {
+				// Execute the tool implementation based on source type
+				if sourceType == "inlineBody" {
+					// Execute the inline body in the TEE
+					stdout, stderr, exitCode, err := p.tee.Execute("go", []string{"run", "-e", sourceValue})
+					if err != nil {
+						return nil, err
+					}
+					
+					if exitCode != 0 {
+						return nil, fmt.Errorf("tool execution failed: %s", stderr)
+					}
+					
+					// Parse the output as JSON
+					var result interface{}
+					if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+						return stdout, nil // Return as string if not JSON
+					}
+					
+					return result, nil
+				} else if sourceType == "filePath" {
+					// Execute the file in the TEE
+					stdout, stderr, exitCode, err := p.tee.Execute("go", []string{"run", sourceValue})
+					if err != nil {
+						return nil, err
+					}
+					
+					if exitCode != 0 {
+						return nil, fmt.Errorf("tool execution failed: %s", stderr)
+					}
+					
+					// Parse the output as JSON
+					var result interface{}
+					if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+						return stdout, nil // Return as string if not JSON
+					}
+					
+					return result, nil
+				}
+				
+				return nil, fmt.Errorf("unsupported source type: %s", sourceType)
+			})
+		}
+	}
+	
+	// Load resources
+	resources, ok := config["resources"].([]interface{})
+	if ok {
+		for _, resourceConfig := range resources {
+			resourceMap, ok := resourceConfig.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			
+			name, _ := resourceMap["name"].(string)
+			content, _ := resourceMap["content"]
+			
+			// Store the resource
+			p.resources[name] = content
+		}
+	}
+	
+	// Load prompts
+	prompts, ok := config["prompts"].([]interface{})
+	if ok {
+		for _, promptConfig := range prompts {
+			promptMap, ok := promptConfig.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			
+			name, _ := promptMap["name"].(string)
+			content, _ := promptMap["content"].(string)
+			
+			// Store the prompt
+			p.prompts[name] = content
+		}
+	}
+	
+	// Load required credentials
+	if requiredCredentials, ok := config["requiredCredentials"].([]interface{}); ok {
+		for _, credConfig := range requiredCredentials {
+			credMap, ok := credConfig.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			
+			name, _ := credMap["name"].(string)
+			envVarName, _ := credMap["envVarName"].(string)
+			
+			// If envVarName is provided, use it; otherwise, use name
+			if envVarName == "" {
+				envVarName = name
+			}
+			
+			// Add to TEE environment variables
+			value := os.Getenv(envVarName)
+			if value != "" {
+				p.teeConfig.EnvVars[envVarName] = value
+			} else {
+				fmt.Printf("Warning: Required credential %s not found in environment variable %s\n", name, envVarName)
+			}
+		}
+	}
+	
+	p.initialized = true
+	return nil
+}
+
+// RegisterTool registers a tool with the agent
+func (p *AgentPlugin) RegisterTool(name string, tool ToolFunc) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	
+	p.tools[name] = tool
+}
+
+// Start starts the agent plugin
+func (p *AgentPlugin) Start() error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	
+	if !p.initialized {
+		return fmt.Errorf("agent not initialized")
+	}
+	
+	if p.running {
+		return nil
+	}
+	
+	// Start the TEE
+	if err := p.tee.Start(); err != nil {
+		return fmt.Errorf("failed to start TEE: %v", err)
+	}
+	
+	// Create the Python agent service within the TEE
+	pythonService, err := NewPythonAgentService(0, p.tee) // Use a random port and the TEE
+	if err != nil {
+		p.tee.Stop() // Clean up the TEE if Python service creation fails
+		return fmt.Errorf("failed to create Python agent service: %v", err)
+	}
+	p.pythonService = pythonService
+	
+	// Start the Python service
+	if err := p.pythonService.Start(); err != nil {
+		p.tee.Stop()
+		return fmt.Errorf("failed to start Python service: %v", err)
+	}
+
+	// Start monitoring service
+	if err := p.monitoringService.Start(); err != nil {
+		p.tee.Stop()
+		p.pythonService.Stop()
+		return fmt.Errorf("failed to start monitoring service: %v", err)
+	}
+
+	// Register main agent for monitoring
+	p.monitoringService.RegisterAgent(AgentID, "main", "")
+	p.monitoringService.UpdateAgentStatus(AgentID, "running")
+
+	p.running = true
+	return nil
+}
+
+// Stop stops the agent plugin
+func (p *AgentPlugin) Stop() error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if !p.running {
+		return nil
+	}
+
+	// Clean up sub-agents first
+	var subAgentErrors []string
+	for subAgentID := range p.subAgents {
+		if err := p.subagentManager.StopSubagent(subAgentID); err != nil {
+			subAgentErrors = append(subAgentErrors, fmt.Sprintf("failed to stop sub-agent %s: %v", subAgentID, err))
+		}
+	}
+
+	if p.subagentManager != nil {
+		if err := p.subagentManager.Cleanup(); err != nil {
+			subAgentErrors = append(subAgentErrors, fmt.Sprintf("failed to cleanup sub-agent manager: %v", err))
+		}
+	}
+
+	// Clear sub-agents map
+	p.subAgents = make(map[string]*SubAgentInfo)
+
+	if len(subAgentErrors) > 0 {
+		fmt.Printf("Warning: errors during sub-agent cleanup: %v\n", subAgentErrors)
+	}
+
+	// Stop monitoring service
+	if p.monitoringService != nil {
+		p.monitoringService.UpdateAgentStatus(AgentID, "stopping")
+		if err := p.monitoringService.Stop(); err != nil {
+			fmt.Printf("Warning: failed to stop monitoring service: %v\n", err)
+		}
+	}
+
+	// Stop the Python service
+	if p.pythonService != nil {
+		if err := p.pythonService.Stop(); err != nil {
+			return err
+		}
+	}
+
+	// Memory manager doesn't need explicit closing
+
+	// Stop the TEE
+	if p.tee != nil {
+		if err := p.tee.Stop(); err != nil {
+			return err
+		}
+	}
+
+	p.running = false
+	return nil
+}
+
+// RunAgent runs an agent with the given input using orchestration
+func (p *AgentPlugin) RunAgent(input string, sessionID string) (string, error) {
+	p.mutex.RLock()
+	if !p.initialized || !p.running {
+		p.mutex.RUnlock()
+		return "", fmt.Errorf("agent not initialized or not running")
+	}
+	orchestrationEngine := p.orchestrationEngine
+	p.mutex.RUnlock()
+
+	ctx := context.Background()
+
+	// Build session context
+	sessionContext := map[string]interface{}{
+		"sessionID": sessionID,
+		"agentID":   AgentID,
+		"timestamp": time.Now(),
+	}
+
+	// Select the appropriate orchestration pattern
+	pattern, err := orchestrationEngine.SelectOrchestrationPattern(ctx, input, sessionContext)
+	if err != nil {
+		// Fallback to simple execution if pattern selection fails
+		return p.pythonService.RunAgent(AgentID, input, sessionID)
+	}
+
+	// Log the selected pattern and update monitoring
+	fmt.Printf("Selected orchestration pattern: %s for input: %s\n", pattern, input)
+	p.monitoringService.UpdateOrchestrationPattern(AgentID, string(pattern))
+	p.monitoringService.LogActivity(AgentID, "info", fmt.Sprintf("Executing pattern: %s", pattern), "orchestration", map[string]interface{}{
+		"pattern": pattern,
+		"input":   input,
+		"session": sessionID,
+	})
+
+	// Execute using the selected orchestration pattern
+	result, err := orchestrationEngine.ExecuteOrchestrationPattern(ctx, pattern, input, sessionID)
+	if err != nil {
+		// Log failure and fallback
+		p.monitoringService.LogActivity(AgentID, "warn", fmt.Sprintf("Orchestration failed: %v", err), "orchestration", map[string]interface{}{
+			"error":   err.Error(),
+			"pattern": pattern,
+		})
+		p.monitoringService.IncrementTaskCounter(AgentID, false)
+
+		// Fallback to simple execution if orchestration fails
+		fmt.Printf("Orchestration failed, falling back to simple execution: %v\n", err)
+		fallbackResult, fallbackErr := p.pythonService.RunAgent(AgentID, input, sessionID)
+		if fallbackErr != nil {
+			p.monitoringService.IncrementTaskCounter(AgentID, false)
+			return "", fallbackErr
+		}
+		p.monitoringService.IncrementTaskCounter(AgentID, true)
+		return fallbackResult, nil
+	}
+
+	// Log successful execution
+	p.monitoringService.LogActivity(AgentID, "info", "Task completed successfully", "orchestration", map[string]interface{}{
+		"pattern": pattern,
+		"result_length": len(result),
+	})
+	p.monitoringService.IncrementTaskCounter(AgentID, true)
+
+	return result, nil
+}
+
+// GenerateText generates text using the LLM inference service
+func (p *AgentPlugin) GenerateText(ctx context.Context, prompt string) (string, error) {
+	p.mutex.RLock()
+	if !p.initialized || !p.running {
+		p.mutex.RUnlock()
+		return "", fmt.Errorf("agent not initialized or not running")
+	}
+	
+	// Check if LLM service is initialized
+	if p.llmService == nil {
+		p.mutex.RUnlock()
+		return "", fmt.Errorf("LLM inference service not initialized")
+	}
+	llmService := p.llmService
+	p.mutex.RUnlock()
+	
+	// Generate text using the LLM service
+	response, err := llmService.GenerateText(ctx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("error generating text: %v", err)
+	}
+	
+	return response.Text, nil
+}
+
+// GenerateFromMessages generates text from a list of messages
+func (p *AgentPlugin) GenerateFromMessages(ctx context.Context, messages []LLMMessage) (string, error) {
+	p.mutex.RLock()
+	if !p.initialized || !p.running {
+		p.mutex.RUnlock()
+		return "", fmt.Errorf("agent not initialized or not running")
+	}
+	
+	// Check if LLM service is initialized
+	if p.llmService == nil {
+		p.mutex.RUnlock()
+		return "", fmt.Errorf("LLM inference service not initialized")
+	}
+	llmService := p.llmService
+	p.mutex.RUnlock()
+	
+	// Generate text using the LLM service
+	response, err := llmService.GenerateFromMessages(ctx, messages)
+	if err != nil {
+		return "", fmt.Errorf("error generating text: %v", err)
+	}
+	
+	return response.Text, nil
+}
+
+// GetOrchestrationStrategies returns available orchestration strategies
+func (p *AgentPlugin) GetOrchestrationStrategies() []OrchestrationStrategy {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.orchestrationEngine == nil {
+		return []OrchestrationStrategy{}
+	}
+
+	return p.orchestrationEngine.strategies
+}
+
+// GetSubAgents returns information about active sub-agents
+func (p *AgentPlugin) GetSubAgents() map[string]*SubAgentInfo {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	// Create a copy to avoid race conditions
+	subAgentsCopy := make(map[string]*SubAgentInfo)
+	for id, info := range p.subAgents {
+		subAgentsCopy[id] = info
+	}
+
+	return subAgentsCopy
+}
+
+// StopSubAgent stops a specific sub-agent
+func (p *AgentPlugin) StopSubAgent(subAgentID string) error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	// Check if sub-agent exists
+	subAgentInfo, exists := p.subAgents[subAgentID]
+	if !exists {
+		return fmt.Errorf("sub-agent %s not found", subAgentID)
+	}
+
+	// Stop the sub-agent using the manager
+	if err := p.subagentManager.StopSubagent(subAgentID); err != nil {
+		return fmt.Errorf("failed to stop sub-agent: %v", err)
+	}
+
+	// Update status
+	subAgentInfo.Status = "stopped"
+	subAgentInfo.LastActive = time.Now()
+
+	return nil
+}
+
+// CleanupSubAgents stops and removes all sub-agents
+func (p *AgentPlugin) CleanupSubAgents() error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	var errors []string
+
+	// Stop all sub-agents
+	for subAgentID := range p.subAgents {
+		if err := p.subagentManager.StopSubagent(subAgentID); err != nil {
+			errors = append(errors, fmt.Sprintf("failed to stop sub-agent %s: %v", subAgentID, err))
+		}
+	}
+
+	// Clean up the sub-agent manager
+	if err := p.subagentManager.Cleanup(); err != nil {
+		errors = append(errors, fmt.Sprintf("failed to cleanup sub-agent manager: %v", err))
+	}
+
+	// Clear sub-agents map
+	p.subAgents = make(map[string]*SubAgentInfo)
+
+	if len(errors) > 0 {
+		return fmt.Errorf("errors during sub-agent cleanup: %v", errors)
+	}
+
+	return nil
+}
+
+// Terminal management methods for sub-agents
+
+// GetSubAgentTerminals returns terminal sessions for a specific sub-agent
+func (p *AgentPlugin) GetSubAgentTerminals(subAgentID string) []*TerminalSession {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.terminalManager == nil {
+		return []*TerminalSession{}
+	}
+
+	return p.terminalManager.GetTerminalSessions(subAgentID)
+}
+
+// WriteToSubAgentTerminal writes output to a sub-agent's terminal
+func (p *AgentPlugin) WriteToSubAgentTerminal(subAgentID, message string) error {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.terminalManager == nil {
+		return fmt.Errorf("terminal manager not initialized")
+	}
+
+	// Find the terminal session for this sub-agent
+	sessions := p.terminalManager.GetTerminalSessions(subAgentID)
+	if len(sessions) == 0 {
+		return fmt.Errorf("no terminal session found for sub-agent %s", subAgentID)
+	}
+
+	// Write to the first (primary) terminal session
+	terminalID := sessions[0].ID
+	timestamp := time.Now().Format("15:04:05")
+	formattedMessage := fmt.Sprintf("[%s] %s\n", timestamp, message)
+
+	return p.terminalManager.WriteToTerminal(terminalID, []byte(formattedMessage))
+}
+
+// ReadFromSubAgentTerminal reads output from a sub-agent's terminal
+func (p *AgentPlugin) ReadFromSubAgentTerminal(subAgentID string) ([]byte, error) {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.terminalManager == nil {
+		return nil, fmt.Errorf("terminal manager not initialized")
+	}
+
+	// Find the terminal session for this sub-agent
+	sessions := p.terminalManager.GetTerminalSessions(subAgentID)
+	if len(sessions) == 0 {
+		return nil, fmt.Errorf("no terminal session found for sub-agent %s", subAgentID)
+	}
+
+	// Read from the first (primary) terminal session
+	terminalID := sessions[0].ID
+	return p.terminalManager.ReadFromTerminal(terminalID)
+}
+
+// GetAllTerminalSessions returns all active terminal sessions
+func (p *AgentPlugin) GetAllTerminalSessions() map[string][]*TerminalSession {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	result := make(map[string][]*TerminalSession)
+
+	for subAgentID := range p.subAgents {
+		sessions := p.terminalManager.GetTerminalSessions(subAgentID)
+		if len(sessions) > 0 {
+			result[subAgentID] = sessions
+		}
+	}
+
+	return result
+}
+
+// LogSubAgentActivity logs activity to a sub-agent's terminal
+func (p *AgentPlugin) LogSubAgentActivity(subAgentID, activity string) {
+	// This is a non-blocking operation to avoid deadlocks
+	go func() {
+		if err := p.WriteToSubAgentTerminal(subAgentID, activity); err != nil {
+			fmt.Printf("Failed to log sub-agent activity: %v\n", err)
+		}
+	}()
+}
+
+// Monitoring methods for agents
+
+// GetAgentMetrics returns metrics for all agents or a specific agent
+func (p *AgentPlugin) GetAgentMetrics(agentID string) map[string]*AgentMetrics {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.monitoringService == nil {
+		return make(map[string]*AgentMetrics)
+	}
+
+	return p.monitoringService.GetMetrics(agentID)
+}
+
+// GetAgentLogs returns log entries with optional filtering
+func (p *AgentPlugin) GetAgentLogs(agentID, level string, limit int) []AgentLogEntry {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.monitoringService == nil {
+		return []AgentLogEntry{}
+	}
+
+	return p.monitoringService.GetLogs(agentID, level, limit)
+}
+
+// GetAgentAlerts returns alerts with optional filtering
+func (p *AgentPlugin) GetAgentAlerts(agentID, status string, limit int) []AgentAlert {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.monitoringService == nil {
+		return []AgentAlert{}
+	}
+
+	return p.monitoringService.GetAlerts(agentID, status, limit)
+}
+
+// GetAgentSummary returns a summary of all agent metrics
+func (p *AgentPlugin) GetAgentSummary() map[string]interface{} {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.monitoringService == nil {
+		return make(map[string]interface{})
+	}
+
+	return p.monitoringService.GetAgentSummary()
+}
+
+// ResolveAgentAlert resolves an alert
+func (p *AgentPlugin) ResolveAgentAlert(alertID string) error {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.monitoringService == nil {
+		return fmt.Errorf("monitoring service not initialized")
+	}
+
+	return p.monitoringService.ResolveAlert(alertID)
+}
+
+// Plugin exports
+var Plugin *AgentPlugin
+
+// Initialize the plugin
+func init() {
+	var err error
+	Plugin, err = NewAgentPlugin()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to initialize agent plugin: %v", err))
+	}
+}

@@ -1,0 +1,15 @@
+module agent_{{.agentId}}
+
+go 1.23
+
+require (
+	github.com/philippgille/chromem-go v0.7.0
+	github.com/google/uuid v1.6.0
+)
+
+// Optional: Add your Cerebras embeddings module if you want to use it directly
+// replace github.com/guiperry/chroma-go_cerebras => /path/to/your/local/chroma-go_cerebras
+
+// Default configuration for Cerebras API
+// Set CEREBRAS_API_KEY environment variable or update the templates with your key
+// The Cerebras embeddings functionality is included directly in the agent code

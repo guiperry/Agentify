@@ -1,0 +1,692 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"sync"
+	"time"
+)
+
+// LLMProvider represents the type of LLM provider
+type LLMProvider string
+
+const (
+	OpenAIProvider    LLMProvider = "openai"
+	AnthropicProvider LLMProvider = "anthropic"
+	GoogleProvider    LLMProvider = "google"
+	CerebrasProvider  LLMProvider = "cerebras"
+	CustomProvider    LLMProvider = "custom"
+)
+
+// LLMConfig holds the configuration for the LLM
+type LLMConfig struct {
+	Provider    LLMProvider     `json:"provider"`
+	Model       string          `json:"model"`
+	APIKey      string          `json:"api_key"`
+	Temperature float64         `json:"temperature"`
+	MaxTokens   int             `json:"max_tokens"`
+	TopP        float64         `json:"top_p"`
+	Parameters  map[string]any  `json:"parameters,omitempty"`
+	Endpoint    string          `json:"endpoint,omitempty"`
+}
+
+// LLMResponse represents a response from an LLM
+type LLMResponse struct {
+	Text       string    `json:"text"`
+	FinishReason string  `json:"finish_reason,omitempty"`
+	Usage      *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage,omitempty"`
+	Error      string    `json:"error,omitempty"`
+}
+
+// LLMMessage represents a message in a conversation
+type LLMMessage struct {
+	Role    string `json:"role"`    // "system", "user", "assistant", "tool"
+	Content string `json:"content"` // The message content
+}
+
+// LLMInferenceService manages LLM inference
+type LLMInferenceService struct {
+	config      LLMConfig
+	client      *http.Client
+	mutex       sync.RWMutex
+	initialized bool
+}
+
+// NewLLMInferenceService creates a new LLM inference service
+func NewLLMInferenceService(config LLMConfig) (*LLMInferenceService, error) {
+	// Validate config
+	if config.Provider == "" {
+		return nil, errors.New("provider is required")
+	}
+	if config.Model == "" {
+		return nil, errors.New("model is required")
+	}
+	
+	// Set default values if not provided
+	if config.Temperature == 0 {
+		config.Temperature = 0.7
+	}
+	if config.MaxTokens == 0 {
+		config.MaxTokens = 1000
+	}
+	if config.TopP == 0 {
+		config.TopP = 1.0
+	}
+	
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+	}
+	
+	return &LLMInferenceService{
+		config:      config,
+		client:      client,
+		initialized: true,
+	}, nil
+}
+
+// GenerateText generates text from a prompt
+func (s *LLMInferenceService) GenerateText(ctx context.Context, prompt string) (*LLMResponse, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	
+	if !s.initialized {
+		return nil, errors.New("LLM inference service not initialized")
+	}
+	
+	// Create messages array with user prompt
+	messages := []LLMMessage{
+		{Role: "user", Content: prompt},
+	}
+	
+	return s.generateFromMessages(ctx, messages)
+}
+
+// GenerateFromMessages generates text from a list of messages
+func (s *LLMInferenceService) GenerateFromMessages(ctx context.Context, messages []LLMMessage) (*LLMResponse, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	
+	if !s.initialized {
+		return nil, errors.New("LLM inference service not initialized")
+	}
+	
+	return s.generateFromMessages(ctx, messages)
+}
+
+// generateFromMessages is the internal implementation for generating from messages
+func (s *LLMInferenceService) generateFromMessages(ctx context.Context, messages []LLMMessage) (*LLMResponse, error) {
+	switch s.config.Provider {
+	case OpenAIProvider:
+		return s.generateOpenAI(ctx, messages)
+	case AnthropicProvider:
+		return s.generateAnthropic(ctx, messages)
+	case GoogleProvider:
+		return s.generateGoogle(ctx, messages)
+	case CerebrasProvider:
+		return s.generateCerebras(ctx, messages)
+	case CustomProvider:
+		return s.generateCustom(ctx, messages)
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", s.config.Provider)
+	}
+}
+
+// generateOpenAI generates text using OpenAI API
+func (s *LLMInferenceService) generateOpenAI(ctx context.Context, messages []LLMMessage) (*LLMResponse, error) {
+	// Convert messages to OpenAI format
+	openaiMessages := make([]map[string]interface{}, len(messages))
+	for i, msg := range messages {
+		openaiMessages[i] = map[string]interface{}{
+			"role":    msg.Role,
+			"content": msg.Content,
+		}
+	}
+	
+	// Create request body
+	requestBody := map[string]interface{}{
+		"model":       s.config.Model,
+		"messages":    openaiMessages,
+		"temperature": s.config.Temperature,
+		"max_tokens":  s.config.MaxTokens,
+		"top_p":       s.config.TopP,
+	}
+	
+	// Add any additional parameters
+	for k, v := range s.config.Parameters {
+		requestBody[k] = v
+	}
+	
+	// Convert request body to JSON
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling request: %v", err)
+	}
+	
+	// Create request
+	endpoint := "https://api.openai.com/v1/chat/completions"
+	if s.config.Endpoint != "" {
+		endpoint = s.config.Endpoint
+	}
+	
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+	
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.config.APIKey)
+	
+	// Send request
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %v", err)
+	}
+	
+	// Check for error
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error from OpenAI API: %s", string(body))
+	}
+	
+	// Parse response
+	var openaiResponse struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	
+	if err := json.Unmarshal(body, &openaiResponse); err != nil {
+		return nil, fmt.Errorf("error parsing response: %v", err)
+	}
+	
+	// Check if we have choices
+	if len(openaiResponse.Choices) == 0 {
+		return nil, errors.New("no choices in response")
+	}
+	
+	// Create response
+	response := &LLMResponse{
+		Text:         openaiResponse.Choices[0].Message.Content,
+		FinishReason: openaiResponse.Choices[0].FinishReason,
+		Usage: &struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		}{
+			PromptTokens:     openaiResponse.Usage.PromptTokens,
+			CompletionTokens: openaiResponse.Usage.CompletionTokens,
+			TotalTokens:      openaiResponse.Usage.TotalTokens,
+		},
+	}
+	
+	return response, nil
+}
+
+// generateAnthropic generates text using Anthropic API
+func (s *LLMInferenceService) generateAnthropic(ctx context.Context, messages []LLMMessage) (*LLMResponse, error) {
+	// Convert messages to Anthropic format
+	var systemPrompt string
+	var anthropicMessages []map[string]interface{}
+	
+	// Extract system message if present
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			systemPrompt = msg.Content
+		} else {
+			anthropicMessages = append(anthropicMessages, map[string]interface{}{
+				"role":    msg.Role,
+				"content": msg.Content,
+			})
+		}
+	}
+	
+	// Create request body
+	requestBody := map[string]interface{}{
+		"model":       s.config.Model,
+		"messages":    anthropicMessages,
+		"temperature": s.config.Temperature,
+		"max_tokens":  s.config.MaxTokens,
+		"top_p":       s.config.TopP,
+	}
+	
+	// Add system prompt if present
+	if systemPrompt != "" {
+		requestBody["system"] = systemPrompt
+	}
+	
+	// Add any additional parameters
+	for k, v := range s.config.Parameters {
+		requestBody[k] = v
+	}
+	
+	// Convert request body to JSON
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling request: %v", err)
+	}
+	
+	// Create request
+	endpoint := "https://api.anthropic.com/v1/messages"
+	if s.config.Endpoint != "" {
+		endpoint = s.config.Endpoint
+	}
+	
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+	
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", s.config.APIKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	
+	// Send request
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %v", err)
+	}
+	
+	// Check for error
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error from Anthropic API: %s", string(body))
+	}
+	
+	// Parse response
+	var anthropicResponse struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		StopReason string `json:"stop_reason"`
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	
+	if err := json.Unmarshal(body, &anthropicResponse); err != nil {
+		return nil, fmt.Errorf("error parsing response: %v", err)
+	}
+	
+	// Check if we have content
+	if len(anthropicResponse.Content) == 0 {
+		return nil, errors.New("no content in response")
+	}
+	
+	// Extract text from content
+	var text string
+	for _, content := range anthropicResponse.Content {
+		if content.Type == "text" {
+			text = content.Text
+			break
+		}
+	}
+	
+	// Create response
+	response := &LLMResponse{
+		Text:         text,
+		FinishReason: anthropicResponse.StopReason,
+		Usage: &struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		}{
+			PromptTokens:     anthropicResponse.Usage.InputTokens,
+			CompletionTokens: anthropicResponse.Usage.OutputTokens,
+			TotalTokens:      anthropicResponse.Usage.InputTokens + anthropicResponse.Usage.OutputTokens,
+		},
+	}
+	
+	return response, nil
+}
+
+// generateGoogle generates text using Google API
+func (s *LLMInferenceService) generateGoogle(ctx context.Context, messages []LLMMessage) (*LLMResponse, error) {
+	// Convert messages to Google format
+	var contents []map[string]interface{}
+	
+	for _, msg := range messages {
+		role := msg.Role
+		if role == "assistant" {
+			role = "model"
+		}
+		
+		contents = append(contents, map[string]interface{}{
+			"role":    role,
+			"parts": []map[string]interface{}{
+				{"text": msg.Content},
+			},
+		})
+	}
+	
+	// Create request body
+	requestBody := map[string]interface{}{
+		"contents":    contents,
+		"generation_config": map[string]interface{}{
+			"temperature":    s.config.Temperature,
+			"maxOutputTokens": s.config.MaxTokens,
+			"topP":           s.config.TopP,
+		},
+	}
+	
+	// Add any additional parameters
+	for k, v := range s.config.Parameters {
+		if k != "generation_config" {
+			requestBody[k] = v
+		} else if configMap, ok := v.(map[string]interface{}); ok {
+			for ck, cv := range configMap {
+				requestBody["generation_config"].(map[string]interface{})[ck] = cv
+			}
+		}
+	}
+	
+	// Convert request body to JSON
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling request: %v", err)
+	}
+	
+	// Create request
+	endpoint := fmt.Sprintf("https://generativelanguage.googleapis.com/v1/models/%s:generateContent?key=%s", s.config.Model, s.config.APIKey)
+	if s.config.Endpoint != "" {
+		endpoint = s.config.Endpoint
+	}
+	
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+	
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	
+	// Send request
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %v", err)
+	}
+	
+	// Check for error
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error from Google API: %s", string(body))
+	}
+	
+	// Parse response
+	var googleResponse struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+			FinishReason string `json:"finishReason"`
+		} `json:"candidates"`
+		UsageMetadata struct {
+			PromptTokenCount     int `json:"promptTokenCount"`
+			CandidatesTokenCount int `json:"candidatesTokenCount"`
+			TotalTokenCount      int `json:"totalTokenCount"`
+		} `json:"usageMetadata"`
+	}
+	
+	if err := json.Unmarshal(body, &googleResponse); err != nil {
+		return nil, fmt.Errorf("error parsing response: %v", err)
+	}
+	
+	// Check if we have candidates
+	if len(googleResponse.Candidates) == 0 {
+		return nil, errors.New("no candidates in response")
+	}
+	
+	// Check if we have parts
+	if len(googleResponse.Candidates[0].Content.Parts) == 0 {
+		return nil, errors.New("no parts in response")
+	}
+	
+	// Create response
+	response := &LLMResponse{
+		Text:         googleResponse.Candidates[0].Content.Parts[0].Text,
+		FinishReason: googleResponse.Candidates[0].FinishReason,
+		Usage: &struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		}{
+			PromptTokens:     googleResponse.UsageMetadata.PromptTokenCount,
+			CompletionTokens: googleResponse.UsageMetadata.CandidatesTokenCount,
+			TotalTokens:      googleResponse.UsageMetadata.TotalTokenCount,
+		},
+	}
+	
+	return response, nil
+}
+
+// generateCerebras generates text using Cerebras API
+func (s *LLMInferenceService) generateCerebras(ctx context.Context, messages []LLMMessage) (*LLMResponse, error) {
+	// Convert messages to Cerebras format
+	cerebrasMessages := make([]map[string]interface{}, len(messages))
+	for i, msg := range messages {
+		cerebrasMessages[i] = map[string]interface{}{
+			"role":    msg.Role,
+			"content": msg.Content,
+		}
+	}
+	
+	// Create request body
+	requestBody := map[string]interface{}{
+		"model":       s.config.Model,
+		"messages":    cerebrasMessages,
+		"temperature": s.config.Temperature,
+		"max_tokens":  s.config.MaxTokens,
+		"top_p":       s.config.TopP,
+	}
+	
+	// Add any additional parameters
+	for k, v := range s.config.Parameters {
+		requestBody[k] = v
+	}
+	
+	// Convert request body to JSON
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling request: %v", err)
+	}
+	
+	// Create request
+	endpoint := "https://api.cerebras.ai/v1/chat/completions"
+	if s.config.Endpoint != "" {
+		endpoint = s.config.Endpoint
+	}
+	
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+	
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.config.APIKey)
+	
+	// Send request
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %v", err)
+	}
+	
+	// Check for error
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error from Cerebras API: %s", string(body))
+	}
+	
+	// Parse response
+	var cerebrasResponse struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	
+	if err := json.Unmarshal(body, &cerebrasResponse); err != nil {
+		return nil, fmt.Errorf("error parsing response: %v", err)
+	}
+	
+	// Check if we have choices
+	if len(cerebrasResponse.Choices) == 0 {
+		return nil, errors.New("no choices in response")
+	}
+	
+	// Create response
+	response := &LLMResponse{
+		Text:         cerebrasResponse.Choices[0].Message.Content,
+		FinishReason: cerebrasResponse.Choices[0].FinishReason,
+		Usage: &struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		}{
+			PromptTokens:     cerebrasResponse.Usage.PromptTokens,
+			CompletionTokens: cerebrasResponse.Usage.CompletionTokens,
+			TotalTokens:      cerebrasResponse.Usage.TotalTokens,
+		},
+	}
+	
+	return response, nil
+}
+
+// generateCustom generates text using a custom API
+func (s *LLMInferenceService) generateCustom(ctx context.Context, messages []LLMMessage) (*LLMResponse, error) {
+	// Ensure endpoint is set
+	if s.config.Endpoint == "" {
+		return nil, errors.New("endpoint is required for custom provider")
+	}
+	
+	// Create request body - this is a generic implementation, adjust as needed
+	requestBody := map[string]interface{}{
+		"model":       s.config.Model,
+		"messages":    messages,
+		"temperature": s.config.Temperature,
+		"max_tokens":  s.config.MaxTokens,
+		"top_p":       s.config.TopP,
+	}
+	
+	// Add any additional parameters
+	for k, v := range s.config.Parameters {
+		requestBody[k] = v
+	}
+	
+	// Convert request body to JSON
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling request: %v", err)
+	}
+	
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "POST", s.config.Endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+	
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	if s.config.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+s.config.APIKey)
+	}
+	
+	// Send request
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+	
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response: %v", err)
+	}
+	
+	// Check for error
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error from custom API: %s", string(body))
+	}
+	
+	// Parse response - this is a generic implementation, adjust as needed
+	var customResponse map[string]interface{}
+	if err := json.Unmarshal(body, &customResponse); err != nil {
+		return nil, fmt.Errorf("error parsing response: %v", err)
+	}
+	
+	// Extract text from response - adjust this based on your API's response format
+	var text string
+	if textValue, ok := customResponse["text"].(string); ok {
+		text = textValue
+	} else if responseValue, ok := customResponse["response"].(string); ok {
+		text = responseValue
+	} else if contentValue, ok := customResponse["content"].(string); ok {
+		text = contentValue
+	} else {
+		// Try to find a text field in the response
+		jsonBytes, _ := json.Marshal(customResponse)
+		text = fmt.Sprintf("Unable to extract text from response: %s", string(jsonBytes))
+	}
+	
+	// Create response
+	response := &LLMResponse{
+		Text: text,
+	}
+	
+	return response, nil
+}

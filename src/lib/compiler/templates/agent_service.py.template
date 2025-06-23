@@ -1,0 +1,493 @@
+import argparse
+import json
+import os
+import sys
+import uuid
+import logging
+import requests
+import time
+from typing import List, Dict, Any, Optional, Union
+from flask import Flask, request, jsonify
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('agent_service')
+
+app = Flask(__name__)
+
+# In-memory agent registry
+agent_registry = {}
+session_registry = {}
+conversation_history = {}
+
+# LLM Provider configurations
+LLM_PROVIDERS = {
+    "openai": {
+        "endpoint": "https://api.openai.com/v1/chat/completions",
+        "models": ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", "gpt-4o"]
+    },
+    "anthropic": {
+        "endpoint": "https://api.anthropic.com/v1/messages",
+        "models": ["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"]
+    },
+    "google": {
+        "endpoint": "https://generativelanguage.googleapis.com/v1/models/{model}:generateContent",
+        "models": ["gemini-1.5-pro", "gemini-1.5-flash"]
+    },
+    "cerebras": {
+        "endpoint": "https://api.cerebras.ai/v1/chat/completions",
+        "models": ["llama-4-scout-17b-16e-instruct"]
+    }
+}
+
+# Message structure
+class Message:
+    def __init__(self, role: str, content: str):
+        self.role = role
+        self.content = content
+    
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "role": self.role,
+            "content": self.content
+        }
+
+# Session structure
+class Session:
+    def __init__(self, session_id: str, user_id: str = "default_user"):
+        self.session_id = session_id
+        self.user_id = user_id
+        self.messages: List[Message] = []
+        self.created_at = time.time()
+        self.last_active = time.time()
+    
+    def add_message(self, role: str, content: str) -> None:
+        self.messages.append(Message(role, content))
+        self.last_active = time.time()
+    
+    def get_messages(self) -> List[Dict[str, str]]:
+        return [msg.to_dict() for msg in self.messages]
+    
+    def clear_messages(self) -> None:
+        self.messages = []
+
+# Agent structure
+class Agent:
+    def __init__(self, agent_id: str, config: Dict[str, Any]):
+        self.agent_id = agent_id
+        self.name = config.get("name", f"Agent-{agent_id}")
+        self.description = config.get("description", "")
+        self.instructions = config.get("instructions", "")
+        self.agent_type = config.get("agent_type", "llm")
+        self.tools = config.get("tools", [])
+        self.model_provider = config.get("model_provider", {
+            "provider": "openai",
+            "model": "gpt-3.5-turbo",
+            "parameters": {
+                "temperature": 0.7,
+                "max_tokens": 1000,
+                "top_p": 1.0
+            }
+        })
+        # Get API key from configuration, environment, or use default for Cerebras
+        provider_name = self.model_provider['provider'].lower()
+        provider_upper = self.model_provider['provider'].upper()
+
+        # First try to get from configuration
+        self.api_key = config.get("apiKeys", {}).get(provider_name, "")
+
+        # If not in config, try environment variable
+        if not self.api_key:
+            self.api_key = os.environ.get(f"{provider_upper}_API_KEY", "")
+
+        # Default Cerebras API key if not found in config or environment
+        if not self.api_key and self.model_provider['provider'] == 'cerebras':
+            self.api_key = "csk-j99xk9m6kr5x5nfmkwdrm3jmctwh6eh3pvcm9ymmy293emhp"
+        self.subagents = config.get("subagents", [])
+        self.created_at = time.time()
+    
+    def get_system_prompt(self) -> str:
+        """Generate the system prompt for the agent."""
+        system_prompt = f"You are {self.name}, {self.description}\n\n"
+        
+        if self.instructions:
+            system_prompt += f"Instructions: {self.instructions}\n\n"
+        
+        if self.tools:
+            system_prompt += "You have access to the following tools:\n"
+            for tool in self.tools:
+                system_prompt += f"- {tool['name']}: {tool['description']}\n"
+            system_prompt += "\n"
+        
+        return system_prompt
+
+# Health check endpoint
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "ok"})
+
+# Create agent endpoint
+@app.route('/create_agent', methods=['POST'])
+def create_agent():
+    config = request.json
+    agent_id = config.get('agent_id', str(uuid.uuid4()))
+    
+    # Create the agent
+    agent = Agent(agent_id, config)
+    
+    # Register agent in registry
+    agent_registry[agent_id] = agent
+    
+    logger.info(f"Created agent: {agent_id} ({agent.name})")
+    return jsonify({"status": "success", "agent_id": agent_id})
+
+# Run agent endpoint
+@app.route('/run_agent/<agent_id>', methods=['POST'])
+def run_agent(agent_id):
+    # Get input from request
+    input_data = request.json.get('input', '')
+    session_id = request.json.get('session_id', 'default')
+    user_id = request.json.get('user_id', 'default_user')
+    
+    # Get agent from registry
+    agent = agent_registry.get(agent_id)
+    if not agent:
+        return jsonify({"status": "error", "error": "Agent not found"})
+    
+    # Get or create session
+    session_key = f"{agent_id}:{session_id}"
+    if session_key not in session_registry:
+        session_registry[session_key] = Session(session_id, user_id)
+        # Add system message
+        session_registry[session_key].add_message("system", agent.get_system_prompt())
+    
+    session = session_registry[session_key]
+    
+    # Add user message
+    session.add_message("user", input_data)
+    
+    # Process with LLM
+    try:
+        response = process_with_llm(agent, session)
+        
+        # Add assistant message
+        session.add_message("assistant", response)
+        
+        return jsonify({"status": "success", "response": response})
+    except Exception as e:
+        logger.error(f"Error processing with LLM: {str(e)}")
+        return jsonify({"status": "error", "error": str(e)})
+
+# Process with LLM
+def process_with_llm(agent: Agent, session: Session) -> str:
+    """Process the conversation with the LLM."""
+    provider = agent.model_provider.get("provider", "openai")
+    model = agent.model_provider.get("model", "gpt-3.5-turbo")
+    parameters = agent.model_provider.get("parameters", {})
+    
+    # Get API key
+    api_key = agent.api_key
+    if not api_key:
+        raise ValueError(f"API key for {provider} not found")
+    
+    # Get messages
+    messages = session.get_messages()
+    
+    # Call the appropriate provider
+    if provider == "openai":
+        return call_openai(api_key, model, messages, parameters)
+    elif provider == "anthropic":
+        return call_anthropic(api_key, model, messages, parameters)
+    elif provider == "google":
+        return call_google(api_key, model, messages, parameters)
+    elif provider == "cerebras":
+        return call_cerebras(api_key, model, messages, parameters)
+    else:
+        raise ValueError(f"Unsupported provider: {provider}")
+
+# OpenAI API call
+def call_openai(api_key: str, model: str, messages: List[Dict[str, str]], parameters: Dict[str, Any]) -> str:
+    """Call the OpenAI API."""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    data = {
+        "model": model,
+        "messages": messages,
+        "temperature": parameters.get("temperature", 0.7),
+        "max_tokens": parameters.get("max_tokens", 1000),
+        "top_p": parameters.get("top_p", 1.0)
+    }
+    
+    # Add any additional parameters
+    for key, value in parameters.items():
+        if key not in ["temperature", "max_tokens", "top_p"]:
+            data[key] = value
+    
+    response = requests.post(
+        LLM_PROVIDERS["openai"]["endpoint"],
+        headers=headers,
+        json=data
+    )
+    
+    if response.status_code != 200:
+        raise ValueError(f"OpenAI API error: {response.text}")
+    
+    result = response.json()
+    return result["choices"][0]["message"]["content"]
+
+# Anthropic API call
+def call_anthropic(api_key: str, model: str, messages: List[Dict[str, str]], parameters: Dict[str, Any]) -> str:
+    """Call the Anthropic API."""
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01"
+    }
+    
+    # Extract system message if present
+    system_prompt = None
+    anthropic_messages = []
+    
+    for message in messages:
+        if message["role"] == "system":
+            system_prompt = message["content"]
+        else:
+            # Convert "user" and "assistant" roles
+            role = message["role"]
+            if role == "assistant":
+                role = "assistant"
+            elif role == "user":
+                role = "user"
+            
+            anthropic_messages.append({
+                "role": role,
+                "content": message["content"]
+            })
+    
+    data = {
+        "model": model,
+        "messages": anthropic_messages,
+        "temperature": parameters.get("temperature", 0.7),
+        "max_tokens": parameters.get("max_tokens", 1000),
+        "top_p": parameters.get("top_p", 1.0)
+    }
+    
+    # Add system prompt if present
+    if system_prompt:
+        data["system"] = system_prompt
+    
+    # Add any additional parameters
+    for key, value in parameters.items():
+        if key not in ["temperature", "max_tokens", "top_p"]:
+            data[key] = value
+    
+    response = requests.post(
+        LLM_PROVIDERS["anthropic"]["endpoint"],
+        headers=headers,
+        json=data
+    )
+    
+    if response.status_code != 200:
+        raise ValueError(f"Anthropic API error: {response.text}")
+    
+    result = response.json()
+    return result["content"][0]["text"]
+
+# Google API call
+def call_google(api_key: str, model: str, messages: List[Dict[str, str]], parameters: Dict[str, Any]) -> str:
+    """Call the Google API."""
+    # Format the endpoint with the model name
+    endpoint = LLM_PROVIDERS["google"]["endpoint"].format(model=model)
+    endpoint = f"{endpoint}?key={api_key}"
+    
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    # Convert messages to Google format
+    contents = []
+    for message in messages:
+        role = message["role"]
+        if role == "assistant":
+            role = "model"
+        
+        contents.append({
+            "role": role,
+            "parts": [{"text": message["content"]}]
+        })
+    
+    data = {
+        "contents": contents,
+        "generationConfig": {
+            "temperature": parameters.get("temperature", 0.7),
+            "maxOutputTokens": parameters.get("max_tokens", 1000),
+            "topP": parameters.get("top_p", 1.0)
+        }
+    }
+    
+    # Add any additional parameters
+    for key, value in parameters.items():
+        if key not in ["temperature", "max_tokens", "top_p"]:
+            if key == "generation_config" and isinstance(value, dict):
+                for k, v in value.items():
+                    data["generationConfig"][k] = v
+            else:
+                data[key] = value
+    
+    response = requests.post(
+        endpoint,
+        headers=headers,
+        json=data
+    )
+    
+    if response.status_code != 200:
+        raise ValueError(f"Google API error: {response.text}")
+    
+    result = response.json()
+    return result["candidates"][0]["content"]["parts"][0]["text"]
+
+# Cerebras API call
+def call_cerebras(api_key: str, model: str, messages: List[Dict[str, str]], parameters: Dict[str, Any]) -> str:
+    """Call the Cerebras API."""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    data = {
+        "model": model,
+        "messages": messages,
+        "temperature": parameters.get("temperature", 0.7),
+        "max_tokens": parameters.get("max_tokens", 1000),
+        "top_p": parameters.get("top_p", 1.0)
+    }
+    
+    # Add any additional parameters
+    for key, value in parameters.items():
+        if key not in ["temperature", "max_tokens", "top_p"]:
+            data[key] = value
+    
+    response = requests.post(
+        LLM_PROVIDERS["cerebras"]["endpoint"],
+        headers=headers,
+        json=data
+    )
+    
+    if response.status_code != 200:
+        raise ValueError(f"Cerebras API error: {response.text}")
+    
+    result = response.json()
+    return result["choices"][0]["message"]["content"]
+
+# List agents endpoint
+@app.route('/list_agents', methods=['GET'])
+def list_agents():
+    agents = []
+    for agent_id, agent in agent_registry.items():
+        agents.append({
+            "agent_id": agent_id,
+            "name": agent.name,
+            "description": agent.description,
+            "agent_type": agent.agent_type,
+            "created_at": agent.created_at
+        })
+    
+    return jsonify({"status": "success", "agents": agents})
+
+# Get agent details endpoint
+@app.route('/agent/<agent_id>', methods=['GET'])
+def get_agent(agent_id):
+    agent = agent_registry.get(agent_id)
+    if not agent:
+        return jsonify({"status": "error", "error": "Agent not found"})
+    
+    return jsonify({
+        "status": "success",
+        "agent": {
+            "agent_id": agent.agent_id,
+            "name": agent.name,
+            "description": agent.description,
+            "instructions": agent.instructions,
+            "agent_type": agent.agent_type,
+            "model_provider": {
+                "provider": agent.model_provider.get("provider"),
+                "model": agent.model_provider.get("model")
+            },
+            "tools": [{"name": tool["name"], "description": tool["description"]} for tool in agent.tools],
+            "created_at": agent.created_at
+        }
+    })
+
+# Delete agent endpoint
+@app.route('/agent/<agent_id>', methods=['DELETE'])
+def delete_agent(agent_id):
+    if agent_id not in agent_registry:
+        return jsonify({"status": "error", "error": "Agent not found"})
+    
+    # Remove agent from registry
+    del agent_registry[agent_id]
+    
+    # Remove associated sessions
+    for session_key in list(session_registry.keys()):
+        if session_key.startswith(f"{agent_id}:"):
+            del session_registry[session_key]
+    
+    return jsonify({"status": "success"})
+
+# Get session history endpoint
+@app.route('/agent/<agent_id>/session/<session_id>', methods=['GET'])
+def get_session_history(agent_id, session_id):
+    session_key = f"{agent_id}:{session_id}"
+    session = session_registry.get(session_key)
+    
+    if not session:
+        return jsonify({"status": "error", "error": "Session not found"})
+    
+    return jsonify({
+        "status": "success",
+        "session": {
+            "session_id": session.session_id,
+            "user_id": session.user_id,
+            "messages": session.get_messages(),
+            "created_at": session.created_at,
+            "last_active": session.last_active
+        }
+    })
+
+# Clear session history endpoint
+@app.route('/agent/<agent_id>/session/<session_id>', methods=['DELETE'])
+def clear_session_history(agent_id, session_id):
+    session_key = f"{agent_id}:{session_id}"
+    session = session_registry.get(session_key)
+    
+    if not session:
+        return jsonify({"status": "error", "error": "Session not found"})
+    
+    # Clear messages but keep system prompt
+    system_prompt = None
+    for message in session.messages:
+        if message.role == "system":
+            system_prompt = message.content
+            break
+    
+    session.clear_messages()
+    
+    # Re-add system prompt if it existed
+    if system_prompt:
+        session.add_message("system", system_prompt)
+    
+    return jsonify({"status": "success"})
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Agent Service')
+    parser.add_argument('--port', type=int, default=5000, help='Port to run the service on')
+    args = parser.parse_args()
+    
+    logger.info(f"Starting Agent Service on port {args.port}")
+    app.run(host='0.0.0.0', port=args.port)

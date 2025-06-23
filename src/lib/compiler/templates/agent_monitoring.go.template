@@ -1,0 +1,482 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+// AgentMetrics represents metrics for an agent or sub-agent
+type AgentMetrics struct {
+	AgentID              string                 `json:"agent_id"`
+	AgentType            string                 `json:"agent_type"` // "main" or "sub"
+	ParentAgentID        string                 `json:"parent_agent_id,omitempty"`
+	Status               string                 `json:"status"`
+	OrchestrationPattern string                 `json:"orchestration_pattern,omitempty"`
+	CreatedAt            time.Time              `json:"created_at"`
+	LastActivity         time.Time              `json:"last_activity"`
+	Uptime               int64                  `json:"uptime_seconds"`
+	TasksCompleted       int64                  `json:"tasks_completed"`
+	TasksFailed          int64                  `json:"tasks_failed"`
+	MemoryUsage          int64                  `json:"memory_usage_bytes"`
+	CPUUsage             float64                `json:"cpu_usage_percent"`
+	TerminalSessions     int                    `json:"terminal_sessions"`
+	SubAgentCount        int                    `json:"sub_agent_count"`
+	LastError            string                 `json:"last_error,omitempty"`
+	CustomMetrics        map[string]interface{} `json:"custom_metrics,omitempty"`
+}
+
+// AgentLogEntry represents a log entry for an agent
+type AgentLogEntry struct {
+	ID        string                 `json:"id"`
+	AgentID   string                 `json:"agent_id"`
+	Level     string                 `json:"level"` // debug, info, warn, error
+	Message   string                 `json:"message"`
+	Timestamp time.Time              `json:"timestamp"`
+	Source    string                 `json:"source"` // orchestration, subagent, terminal, etc.
+	Context   map[string]interface{} `json:"context,omitempty"`
+}
+
+// AgentAlert represents an alert for agent issues
+type AgentAlert struct {
+	ID          string                 `json:"id"`
+	AgentID     string                 `json:"agent_id"`
+	Type        string                 `json:"type"`    // error, warning, info
+	Title       string                 `json:"title"`
+	Description string                 `json:"description"`
+	Severity    string                 `json:"severity"` // low, medium, high, critical
+	Status      string                 `json:"status"`   // active, resolved
+	CreatedAt   time.Time              `json:"created_at"`
+	ResolvedAt  *time.Time             `json:"resolved_at,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// AgentMonitoringService manages monitoring for agents and sub-agents
+type AgentMonitoringService struct {
+	metrics          map[string]*AgentMetrics
+	logs             []AgentLogEntry
+	alerts           []AgentAlert
+	mutex            sync.RWMutex
+	logDir           string
+	maxLogEntries    int
+	maxAlerts        int
+	metricsInterval  time.Duration
+	stopChan         chan bool
+	running          bool
+}
+
+// NewAgentMonitoringService creates a new agent monitoring service
+func NewAgentMonitoringService() *AgentMonitoringService {
+	// Create logs directory
+	logDir := filepath.Join(".", "agent_monitoring")
+	os.MkdirAll(logDir, 0755)
+
+	return &AgentMonitoringService{
+		metrics:         make(map[string]*AgentMetrics),
+		logs:            make([]AgentLogEntry, 0),
+		alerts:          make([]AgentAlert, 0),
+		logDir:          logDir,
+		maxLogEntries:   5000, // Keep last 5000 log entries
+		maxAlerts:       500,  // Keep last 500 alerts
+		metricsInterval: 10 * time.Second,
+		stopChan:        make(chan bool),
+		running:         false,
+	}
+}
+
+// Start begins the monitoring service
+func (s *AgentMonitoringService) Start() error {
+	s.mutex.Lock()
+	if s.running {
+		s.mutex.Unlock()
+		return fmt.Errorf("monitoring service already running")
+	}
+	s.running = true
+	s.mutex.Unlock()
+
+	// Start monitoring loop
+	go s.monitoringLoop()
+	s.LogActivity("system", "info", "Agent monitoring service started", "system", nil)
+	return nil
+}
+
+// Stop stops the monitoring service
+func (s *AgentMonitoringService) Stop() error {
+	s.mutex.Lock()
+	if !s.running {
+		s.mutex.Unlock()
+		return nil
+	}
+	s.running = false
+	s.mutex.Unlock()
+
+	s.stopChan <- true
+	s.LogActivity("system", "info", "Agent monitoring service stopped", "system", nil)
+	return nil
+}
+
+// monitoringLoop runs the main monitoring loop
+func (s *AgentMonitoringService) monitoringLoop() {
+	ticker := time.NewTicker(s.metricsInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			s.collectMetrics()
+			s.checkAlerts()
+		case <-s.stopChan:
+			return
+		}
+	}
+}
+
+// RegisterAgent registers a new agent for monitoring
+func (s *AgentMonitoringService) RegisterAgent(agentID, agentType, parentAgentID string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	metrics := &AgentMetrics{
+		AgentID:       agentID,
+		AgentType:     agentType,
+		ParentAgentID: parentAgentID,
+		Status:        "initializing",
+		CreatedAt:     time.Now(),
+		LastActivity:  time.Now(),
+		CustomMetrics: make(map[string]interface{}),
+	}
+
+	s.metrics[agentID] = metrics
+	s.LogActivity(agentID, "info", fmt.Sprintf("Agent %s registered for monitoring", agentID), "monitoring", nil)
+}
+
+// UpdateAgentStatus updates an agent's status
+func (s *AgentMonitoringService) UpdateAgentStatus(agentID, status string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if metrics, exists := s.metrics[agentID]; exists {
+		metrics.Status = status
+		metrics.LastActivity = time.Now()
+		s.LogActivity(agentID, "info", fmt.Sprintf("Agent status updated to: %s", status), "monitoring", nil)
+	}
+}
+
+// UpdateOrchestrationPattern updates the orchestration pattern for an agent
+func (s *AgentMonitoringService) UpdateOrchestrationPattern(agentID, pattern string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if metrics, exists := s.metrics[agentID]; exists {
+		metrics.OrchestrationPattern = pattern
+		metrics.LastActivity = time.Now()
+		s.LogActivity(agentID, "info", fmt.Sprintf("Orchestration pattern set to: %s", pattern), "orchestration", nil)
+	}
+}
+
+// IncrementTaskCounter increments task counters for an agent
+func (s *AgentMonitoringService) IncrementTaskCounter(agentID string, success bool) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if metrics, exists := s.metrics[agentID]; exists {
+		if success {
+			metrics.TasksCompleted++
+		} else {
+			metrics.TasksFailed++
+		}
+		metrics.LastActivity = time.Now()
+	}
+}
+
+// UpdateSubAgentCount updates the sub-agent count for a main agent
+func (s *AgentMonitoringService) UpdateSubAgentCount(agentID string, count int) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if metrics, exists := s.metrics[agentID]; exists {
+		metrics.SubAgentCount = count
+		metrics.LastActivity = time.Now()
+	}
+}
+
+// LogActivity logs an activity for an agent
+func (s *AgentMonitoringService) LogActivity(agentID, level, message, source string, context map[string]interface{}) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	entry := AgentLogEntry{
+		ID:        fmt.Sprintf("log_%d", time.Now().UnixNano()),
+		AgentID:   agentID,
+		Level:     level,
+		Message:   message,
+		Timestamp: time.Now(),
+		Source:    source,
+		Context:   context,
+	}
+
+	s.logs = append(s.logs, entry)
+
+	// Keep only the last maxLogEntries entries
+	if len(s.logs) > s.maxLogEntries {
+		s.logs = s.logs[len(s.logs)-s.maxLogEntries:]
+	}
+
+	// Write to log file
+	s.writeLogToFile(entry)
+
+	// Update last activity for the agent
+	if metrics, exists := s.metrics[agentID]; exists {
+		metrics.LastActivity = time.Now()
+	}
+}
+
+// writeLogToFile writes a log entry to file
+func (s *AgentMonitoringService) writeLogToFile(entry AgentLogEntry) {
+	logFile := filepath.Join(s.logDir, fmt.Sprintf("%s.log", entry.AgentID))
+
+	file, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	logLine := fmt.Sprintf("[%s] %s [%s] %s\n",
+		entry.Timestamp.Format("2006-01-02 15:04:05"),
+		entry.Level,
+		entry.Source,
+		entry.Message)
+
+	file.WriteString(logLine)
+}
+
+// collectMetrics collects metrics from all registered agents
+func (s *AgentMonitoringService) collectMetrics() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	now := time.Now()
+	for _, metrics := range s.metrics {
+		// Update uptime
+		if metrics.Status == "running" {
+			metrics.Uptime = int64(now.Sub(metrics.CreatedAt).Seconds())
+		}
+
+		// Simulate resource usage (in a real implementation, this would come from actual monitoring)
+		if metrics.Status == "running" {
+			metrics.MemoryUsage = int64(50 * 1024 * 1024) // 50MB base
+			if metrics.AgentType == "main" {
+				metrics.MemoryUsage += int64(metrics.SubAgentCount * 10 * 1024 * 1024) // +10MB per sub-agent
+			}
+			metrics.CPUUsage = 5.0 + float64(metrics.SubAgentCount)*2.5 // Base 5% + 2.5% per sub-agent
+		}
+	}
+}
+
+// checkAlerts checks for alert conditions
+func (s *AgentMonitoringService) checkAlerts() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	for agentID, metrics := range s.metrics {
+		// Check for high failure rate
+		totalTasks := metrics.TasksCompleted + metrics.TasksFailed
+		if totalTasks > 10 && float64(metrics.TasksFailed)/float64(totalTasks) > 0.3 {
+			s.createAlert(agentID, "warning", "High Task Failure Rate",
+				fmt.Sprintf("Agent has %d failed tasks out of %d total", metrics.TasksFailed, totalTasks),
+				"medium", map[string]interface{}{
+					"failure_rate": float64(metrics.TasksFailed) / float64(totalTasks),
+					"total_tasks":  totalTasks,
+				})
+		}
+
+		// Check for high memory usage
+		if metrics.MemoryUsage > 500*1024*1024 { // 500MB
+			s.createAlert(agentID, "warning", "High Memory Usage",
+				fmt.Sprintf("Agent memory usage: %d MB", metrics.MemoryUsage/(1024*1024)),
+				"medium", map[string]interface{}{
+					"memory_usage_mb": metrics.MemoryUsage / (1024 * 1024),
+				})
+		}
+
+		// Check for inactive agents
+		if metrics.Status == "running" && time.Since(metrics.LastActivity) > 5*time.Minute {
+			s.createAlert(agentID, "warning", "Agent Inactive",
+				fmt.Sprintf("Agent has been inactive for %v", time.Since(metrics.LastActivity)),
+				"low", map[string]interface{}{
+					"inactive_duration": time.Since(metrics.LastActivity).String(),
+				})
+		}
+	}
+}
+
+// createAlert creates a new alert
+func (s *AgentMonitoringService) createAlert(agentID, alertType, title, description, severity string, metadata map[string]interface{}) {
+	alert := AgentAlert{
+		ID:          fmt.Sprintf("alert_%d", time.Now().UnixNano()),
+		AgentID:     agentID,
+		Type:        alertType,
+		Title:       title,
+		Description: description,
+		Severity:    severity,
+		Status:      "active",
+		CreatedAt:   time.Now(),
+		Metadata:    metadata,
+	}
+
+	s.alerts = append(s.alerts, alert)
+
+	// Keep only the last maxAlerts alerts
+	if len(s.alerts) > s.maxAlerts {
+		s.alerts = s.alerts[len(s.alerts)-s.maxAlerts:]
+	}
+
+	// Log the alert
+	s.LogActivity(agentID, "warn", fmt.Sprintf("Alert created: %s", title), "monitoring", metadata)
+}
+
+// GetMetrics returns metrics for all agents or a specific agent
+func (s *AgentMonitoringService) GetMetrics(agentID string) map[string]*AgentMetrics {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	if agentID != "" {
+		if metrics, exists := s.metrics[agentID]; exists {
+			return map[string]*AgentMetrics{agentID: metrics}
+		}
+		return make(map[string]*AgentMetrics)
+	}
+
+	// Return all metrics
+	result := make(map[string]*AgentMetrics)
+	for k, v := range s.metrics {
+		result[k] = v
+	}
+	return result
+}
+
+// GetLogs returns log entries with optional filtering
+func (s *AgentMonitoringService) GetLogs(agentID, level string, limit int) []AgentLogEntry {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	var filtered []AgentLogEntry
+	for i := len(s.logs) - 1; i >= 0; i-- {
+		entry := s.logs[i]
+
+		if agentID != "" && entry.AgentID != agentID {
+			continue
+		}
+		if level != "" && entry.Level != level {
+			continue
+		}
+
+		filtered = append(filtered, entry)
+
+		if limit > 0 && len(filtered) >= limit {
+			break
+		}
+	}
+
+	return filtered
+}
+
+// GetAlerts returns alerts with optional filtering
+func (s *AgentMonitoringService) GetAlerts(agentID, status string, limit int) []AgentAlert {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	var filtered []AgentAlert
+	for i := len(s.alerts) - 1; i >= 0; i-- {
+		alert := s.alerts[i]
+
+		if agentID != "" && alert.AgentID != agentID {
+			continue
+		}
+		if status != "" && alert.Status != status {
+			continue
+		}
+
+		filtered = append(filtered, alert)
+
+		if limit > 0 && len(filtered) >= limit {
+			break
+		}
+	}
+
+	return filtered
+}
+
+// ResolveAlert resolves an alert
+func (s *AgentMonitoringService) ResolveAlert(alertID string) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	for i := range s.alerts {
+		if s.alerts[i].ID == alertID {
+			now := time.Now()
+			s.alerts[i].Status = "resolved"
+			s.alerts[i].ResolvedAt = &now
+			s.LogActivity(s.alerts[i].AgentID, "info", fmt.Sprintf("Alert resolved: %s", s.alerts[i].Title), "monitoring", nil)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("alert not found: %s", alertID)
+}
+
+// UnregisterAgent removes an agent from monitoring
+func (s *AgentMonitoringService) UnregisterAgent(agentID string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if _, exists := s.metrics[agentID]; exists {
+		delete(s.metrics, agentID)
+		s.LogActivity(agentID, "info", fmt.Sprintf("Agent %s unregistered from monitoring", agentID), "monitoring", nil)
+	}
+}
+
+// GetAgentSummary returns a summary of all agent metrics
+func (s *AgentMonitoringService) GetAgentSummary() map[string]interface{} {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	summary := map[string]interface{}{
+		"total_agents":     len(s.metrics),
+		"main_agents":      0,
+		"sub_agents":       0,
+		"running_agents":   0,
+		"failed_agents":    0,
+		"total_tasks":      int64(0),
+		"total_failures":   int64(0),
+		"active_alerts":    0,
+		"total_log_entries": len(s.logs),
+	}
+
+	for _, metrics := range s.metrics {
+		if metrics.AgentType == "main" {
+			summary["main_agents"] = summary["main_agents"].(int) + 1
+		} else {
+			summary["sub_agents"] = summary["sub_agents"].(int) + 1
+		}
+
+		if metrics.Status == "running" {
+			summary["running_agents"] = summary["running_agents"].(int) + 1
+		} else if metrics.Status == "failed" {
+			summary["failed_agents"] = summary["failed_agents"].(int) + 1
+		}
+
+		summary["total_tasks"] = summary["total_tasks"].(int64) + metrics.TasksCompleted + metrics.TasksFailed
+		summary["total_failures"] = summary["total_failures"].(int64) + metrics.TasksFailed
+	}
+
+	for _, alert := range s.alerts {
+		if alert.Status == "active" {
+			summary["active_alerts"] = summary["active_alerts"].(int) + 1
+		}
+	}
+
+	return summary
+}

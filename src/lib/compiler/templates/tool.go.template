@@ -1,0 +1,19 @@
+package main
+
+import (
+	"fmt"
+)
+
+// {{.toolName}} implements the {{.toolDescription}}
+func {{.toolName}}(params map[string]interface{}) (interface{}, error) {
+	// Parse parameters
+	{{.parameterParsing}}
+
+	// Tool implementation
+	{{.toolImplementation}}
+}
+
+// Register the tool
+func init() {
+	RegisterTool("{{.toolName}}", {{.toolName}})
+}
