@@ -1,8 +1,66 @@
 const WebSocket = require('ws');
 const http = require('http');
+const url = require('url');
 
-// Create HTTP server
-const server = http.createServer();
+// Create HTTP server with basic routing for WebSocket triggers
+const server = http.createServer((req, res) => {
+  const parsedUrl = url.parse(req.url, true);
+
+  // Enable CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+
+  // Handle compilation update endpoint
+  if (req.method === 'POST' && parsedUrl.pathname === '/broadcast/compilation') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body);
+        broadcastCompilationUpdate(payload);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Compilation update broadcasted' }));
+      } catch (error) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+
+  // Handle deployment update endpoint
+  if (req.method === 'POST' && parsedUrl.pathname === '/broadcast/deployment') {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk.toString();
+    });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(body);
+        broadcastDeploymentUpdate(payload);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Deployment update broadcasted' }));
+      } catch (error) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+
+  // Default response
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Not found' }));
+});
 
 // Create WebSocket server
 const wss = new WebSocket.Server({ 
@@ -75,6 +133,21 @@ function broadcastDeploymentUpdate(payload) {
   });
 }
 
+// Function to broadcast compilation updates to all connected clients
+function broadcastCompilationUpdate(payload) {
+  const message = JSON.stringify({
+    type: 'compilation_update',
+    ...payload,
+    timestamp: new Date().toISOString()
+  });
+
+  clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
+
 // Mock deployment updates for testing
 function startMockDeploymentUpdates() {
   setInterval(() => {
@@ -124,5 +197,6 @@ process.on('SIGINT', () => {
 module.exports = {
   wss,
   broadcastDeploymentUpdate,
+  broadcastCompilationUpdate,
   clients
 };

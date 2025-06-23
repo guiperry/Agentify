@@ -155,11 +155,29 @@ export async function createAgentCompilerService(): Promise<AgentCompilerService
   // For Next.js, we need to adjust the paths
   const appRoot = process.cwd();
   const defaultTemplateDir = path.join(appRoot, 'src', 'lib', 'compiler', 'templates');
-  const defaultOutputDir = path.join(appRoot, 'public', 'output');
+
+  // Use temporary directory for serverless environments
+  let defaultOutputDir: string;
+  if (process.env.NETLIFY || process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    // In serverless environments, use /tmp directory
+    defaultOutputDir = path.join('/tmp', 'agentify-output');
+  } else {
+    // In local development, use public/output
+    defaultOutputDir = path.join(appRoot, 'public', 'output');
+  }
 
   // Create the output directory if it doesn't exist
-  if (!fs.existsSync(defaultOutputDir)) {
-    fs.mkdirSync(defaultOutputDir, { recursive: true });
+  try {
+    if (!fs.existsSync(defaultOutputDir)) {
+      fs.mkdirSync(defaultOutputDir, { recursive: true });
+    }
+  } catch (error) {
+    console.warn('Could not create output directory:', error);
+    // Fallback to /tmp if we can't create the directory
+    defaultOutputDir = path.join('/tmp', 'agentify-output');
+    if (!fs.existsSync(defaultOutputDir)) {
+      fs.mkdirSync(defaultOutputDir, { recursive: true });
+    }
   }
 
   // Create the compiler instance

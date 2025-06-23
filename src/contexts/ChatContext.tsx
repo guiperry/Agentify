@@ -137,68 +137,14 @@ export const ChatProvider: React.FC<{
     }
   }, [setSessions]);
 
-  // Function to load sessions from API or local storage
+  // Function to load sessions from local storage only
   const loadSessions = useCallback(async () => {
-    try {
-      // Check if API is available (force recheck for fresh status)
-      const apiAvailable = await checkApiAvailability(true);
-      setIsApiAvailable(apiAvailable);
+    loadFromLocalStorage();
+  }, [loadFromLocalStorage]);
 
-      // If API is not available, use local storage only
-      if (!apiAvailable) {
-        console.log('API is not available. Using local storage only.');
-        loadFromLocalStorage();
-        return;
-      }
-
-      // Try to load from API
-      try {
-        const response = await fetch('/api/chat/sessions', {
-          headers: { 'Accept': 'application/json' },
-          signal: AbortSignal.timeout(3000) // 3 second timeout
-        });
-
-        if (!response.ok) {
-          console.error('Failed to load chat sessions. Server returned:', response.status, response.statusText);
-          loadFromLocalStorage();
-          return;
-        }
-
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-          console.error('Server returned non-JSON response:', contentType);
-          loadFromLocalStorage();
-          return;
-        }
-
-        const data = await response.json();
-        const sessions = data.sessions || [];
-        setSessions(sessions);
-
-        // Also save to local storage as backup
-        try {
-          localStorage.setItem('chatSessions', JSON.stringify(sessions));
-        } catch (localStorageError) {
-          console.warn('Failed to save sessions to local storage:', localStorageError);
-        }
-      } catch (apiError) {
-        console.error('Error fetching from API:', apiError);
-        loadFromLocalStorage();
-      }
-    } catch (error) {
-      console.error('Failed to load chat sessions:', error);
-      loadFromLocalStorage();
-    }
-  }, [loadFromLocalStorage, setIsApiAvailable, setSessions]);
-
-  // Check API availability on mount - force recheck to ensure fresh status
+  // Set API as available since we're using local storage only for chat sessions
   useEffect(() => {
-    const checkApi = async () => {
-      const available = await checkApiAvailability(true); // Force recheck
-      setIsApiAvailable(available);
-    };
-
-    checkApi();
+    setIsApiAvailable(true);
   }, []);
 
   // Load sessions on initial mount

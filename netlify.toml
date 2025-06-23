@@ -25,6 +25,9 @@
   # Next.js specific environment variables
   NEXT_PUBLIC_USE_REAL_BACKEND = "true"
 
+  # WebSocket Configuration (disabled for serverless deployment)
+  NEXT_PUBLIC_ENABLE_WEBSOCKET = "false"
+
   # Go version (for future use when real compilation is implemented)
   GO_VERSION = "1.21"
 

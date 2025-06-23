@@ -30,12 +30,14 @@ export interface WebhookPayload {
   timestamp: string;
 }
 
+// Import the WebSocket manager to avoid creating duplicate connections
+import { WebSocketManager } from '../hooks/useWebSocket';
+
 class DeploymentTracker {
   private deployments = new Map<string, DeploymentStatus>();
   private listeners = new Set<(deployment: DeploymentStatus) => void>();
-  private websocket: WebSocket | null = null;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private wsManager: WebSocketManager | null = null;
+  private messageListener: ((message: any) => void) | null = null;
 
   constructor() {
     // Only initialize WebSocket if explicitly enabled
@@ -47,48 +49,21 @@ class DeploymentTracker {
   }
 
   private initializeWebSocket() {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws';
-    
     try {
-      this.websocket = new WebSocket(wsUrl);
-      
-      this.websocket.onopen = () => {
-        console.log('Deployment tracker WebSocket connected');
-        this.reconnectAttempts = 0;
-      };
+      // Use the singleton WebSocket manager instead of creating a new connection
+      this.wsManager = WebSocketManager.getInstance();
 
-      this.websocket.onmessage = (event) => {
-        try {
-          const payload: WebhookPayload = JSON.parse(event.data);
-          this.handleWebhookUpdate(payload);
-        } catch (error) {
-          console.error('Failed to parse WebSocket message:', error);
+      // Create a message listener for deployment updates
+      this.messageListener = (message: any) => {
+        if (message.type === 'deployment_update') {
+          this.handleWebhookUpdate(message.data);
         }
       };
 
-      this.websocket.onclose = () => {
-        console.log('Deployment tracker WebSocket disconnected');
-        this.attemptReconnect();
-      };
-
-      this.websocket.onerror = (error) => {
-        console.error('WebSocket error:', error);
-      };
+      this.wsManager.addListener(this.messageListener);
+      console.log('Deployment tracker connected to WebSocket manager');
     } catch (error) {
-      console.error('Failed to initialize WebSocket:', error);
-      this.attemptReconnect();
-    }
-  }
-
-  private attemptReconnect() {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      const delay = Math.pow(2, this.reconnectAttempts) * 1000; // Exponential backoff
-      
-      setTimeout(() => {
-        console.log(`Attempting to reconnect WebSocket (attempt ${this.reconnectAttempts})`);
-        this.initializeWebSocket();
-      }, delay);
+      console.error('Failed to initialize WebSocket for deployment tracker:', error);
     }
   }
 
@@ -302,9 +277,10 @@ class DeploymentTracker {
   }
 
   disconnect() {
-    if (this.websocket) {
-      this.websocket.close();
-      this.websocket = null;
+    if (this.wsManager && this.messageListener) {
+      this.wsManager.removeListener(this.messageListener);
+      this.messageListener = null;
+      this.wsManager = null;
     }
     this.listeners.clear();
   }

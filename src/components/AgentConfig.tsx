@@ -20,6 +20,7 @@ import ImportConfigModal from "@/components/ImportConfigModal";
 import ExportConfigModal from "@/components/ExportConfigModal";
 import { parseConfigFile } from "@/services";
 import { configurationService, ProcessingStep } from "@/services/configurationService";
+import { useWebSocket } from "@/hooks/useWebSocket";
 
 export interface AgentFacts {
   id: string;
@@ -170,6 +171,14 @@ const AgentConfig = ({
   const [exportModalOpen, setExportModalOpen] = useState(false);
 
   const { toast } = useToast();
+
+  // WebSocket for real-time updates
+  const { sendCompilationUpdate, isConnected: wsConnected } = useWebSocket({
+    onCompilationUpdate: (update) => {
+      console.log('Received compilation update:', update);
+      // You can add additional handling here if needed
+    }
+  });
 
   // Update agent name when connected app changes (only if no saved progress)
   useEffect(() => {
@@ -401,15 +410,47 @@ const AgentConfig = ({
     setCompletedTabs(new Set()); // Reset completed tabs
     setWaitingForCompilation(false); // Reset waiting state
 
+    // Send initial WebSocket update
+    if (wsConnected) {
+      sendCompilationUpdate({
+        step: 'initialization',
+        progress: 0,
+        message: 'Starting configuration processing...',
+        status: 'in_progress'
+      });
+    }
+
     try {
       // First validate the agent facts
       console.log('Starting validation with agent facts:', agentFacts);
+
+      // Send validation start update
+      if (wsConnected) {
+        sendCompilationUpdate({
+          step: 'validation',
+          progress: 10,
+          message: 'Validating agent configuration...',
+          status: 'in_progress'
+        });
+      }
+
       const validation = await configurationService.validateAgentFacts(agentFacts);
       console.log('Validation result:', validation);
 
       if (!validation.isValid) {
         setValidationErrors(validation.errors);
         console.error('Validation failed with errors:', validation.errors);
+
+        // Send validation failure update
+        if (wsConnected) {
+          sendCompilationUpdate({
+            step: 'validation',
+            progress: 10,
+            message: 'Validation failed: ' + Object.values(validation.errors).join(', '),
+            status: 'error'
+          });
+        }
+
         toast({
           title: "Validation Failed",
           description: "Please fix the validation errors before proceeding.",
@@ -419,8 +460,28 @@ const AgentConfig = ({
         return;
       }
 
+      // Send validation success update
+      if (wsConnected) {
+        sendCompilationUpdate({
+          step: 'validation',
+          progress: 25,
+          message: 'Agent configuration validated successfully',
+          status: 'completed'
+        });
+      }
+
       // Clear any previous validation errors
       setValidationErrors({});
+
+      // Send configuration preparation update
+      if (wsConnected) {
+        sendCompilationUpdate({
+          step: 'configuration',
+          progress: 35,
+          message: 'Preparing agent configuration...',
+          status: 'in_progress'
+        });
+      }
 
       // Create configuration object
       const config: AgentConfiguration = {
@@ -436,6 +497,16 @@ const AgentConfig = ({
           mcpServers
         }
       };
+
+      // Send configuration ready update
+      if (wsConnected) {
+        sendCompilationUpdate({
+          step: 'configuration',
+          progress: 45,
+          message: 'Agent configuration prepared successfully',
+          status: 'completed'
+        });
+      }
 
       // Use mock service for development, real service for production
       const useRealBackend = process.env.NODE_ENV === 'production';
@@ -458,6 +529,17 @@ const AgentConfig = ({
                 }
                 return updated;
               });
+
+              // Send WebSocket update for each step
+              if (wsConnected) {
+                sendCompilationUpdate({
+                  step: step.id,
+                  progress: step.progress,
+                  message: step.message || `${step.name} - ${step.status}`,
+                  status: step.status === 'running' ? 'in_progress' :
+                         step.status === 'completed' ? 'completed' : 'error'
+                });
+              }
 
               // Update active tab based on current step
               if (step.id === 'validate') {
@@ -509,6 +591,17 @@ const AgentConfig = ({
                 return updated;
               });
 
+              // Send WebSocket update for each step (mock version)
+              if (wsConnected) {
+                sendCompilationUpdate({
+                  step: step.id,
+                  progress: step.progress,
+                  message: step.message || `${step.name} - ${step.status}`,
+                  status: step.status === 'running' ? 'in_progress' :
+                         step.status === 'completed' ? 'completed' : 'error'
+                });
+              }
+
               // Update active tab based on current step
               if (step.id === 'validate') {
                 setActiveTab('identity');
@@ -551,12 +644,34 @@ const AgentConfig = ({
 
       if (result.success) {
         setConfigProcessComplete(true);
+
+        // Send final success WebSocket update
+        if (wsConnected) {
+          sendCompilationUpdate({
+            step: 'complete',
+            progress: 100,
+            message: 'Configuration processing completed successfully!',
+            status: 'completed'
+          });
+        }
+
         toast({
           title: "Configuration Processing Complete",
           description: "All configuration steps have been processed successfully. You can now mint your agent.",
         });
       } else {
         console.error('Processing failed with result:', result);
+
+        // Send failure WebSocket update
+        if (wsConnected) {
+          sendCompilationUpdate({
+            step: 'error',
+            progress: 0,
+            message: result.errors?.join(', ') || "Configuration processing failed",
+            status: 'error'
+          });
+        }
+
         toast({
           title: "Processing Failed",
           description: result.errors?.join(', ') || "Configuration processing failed.",
@@ -565,6 +680,17 @@ const AgentConfig = ({
       }
     } catch (error) {
       console.error('Configuration processing error:', error);
+
+      // Send error WebSocket update
+      if (wsConnected) {
+        sendCompilationUpdate({
+          step: 'error',
+          progress: 0,
+          message: `Processing error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          status: 'error'
+        });
+      }
+
       toast({
         title: "Processing Error",
         description: "An unexpected error occurred during processing.",
@@ -1380,7 +1506,7 @@ const AgentConfig = ({
           </Tabs>
 
           {/* Register Agent and Process Configuration Buttons */}
-          <div className="flex justify-start space-x-4">
+          <div className="flex justify-start space-x-4 items-center">
             {/* Register Agent Button */}
             <Button
               onClick={handleRegisterAgent}
@@ -1424,6 +1550,16 @@ const AgentConfig = ({
                 </>
               )}
             </Button>
+
+            {/* WebSocket Status Indicator */}
+            {process.env.NEXT_PUBLIC_ENABLE_WEBSOCKET === 'true' && (
+              <div className="flex items-center space-x-2 text-sm">
+                <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+                <span className="text-white/70">
+                  WebSocket: {wsConnected ? 'Connected' : 'Disconnected'}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Processing Status - Only shown during processing */}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAgentCompilerService } from '@/lib/compiler/agent-compiler-interface';
 import type { AgentPluginConfig } from '@/lib/compiler/agent-compiler-interface';
+import { sendCompilationUpdate } from '@/lib/websocket-utils';
 
 export async function POST(request: Request) {
   try {
@@ -8,11 +9,14 @@ export async function POST(request: Request) {
     const { agentConfig, advancedSettings, selectedPlatform } = payload;
 
     if (!agentConfig) {
-      return NextResponse.json({ 
-        success: false, 
-        message: 'Missing agent configuration' 
+      return NextResponse.json({
+        success: false,
+        message: 'Missing agent configuration'
       }, { status: 400 });
     }
+
+    // Send initial compilation update
+    await sendCompilationUpdate('initialization', 10, 'Initializing compiler service...');
 
     // Initialize the compiler service
     const compilerService = await createAgentCompilerService();
@@ -29,11 +33,15 @@ export async function POST(request: Request) {
       }
     };
 
+    // Send configuration processing update
+    await sendCompilationUpdate('configuration', 30, 'Processing agent configuration...');
+
     // Convert UI config to compiler config
     let pluginConfig: AgentPluginConfig;
     try {
       pluginConfig = compilerService.convertUIConfigToPluginConfig(uiConfigForConversion);
     } catch (conversionError) {
+      await sendCompilationUpdate('configuration', 30, `Configuration conversion failed: ${conversionError instanceof Error ? conversionError.message : String(conversionError)}`, 'error');
       return NextResponse.json({
         success: false,
         message: `Configuration conversion failed: ${conversionError instanceof Error ? conversionError.message : String(conversionError)}`

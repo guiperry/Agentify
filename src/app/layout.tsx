@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from "@/contexts/AuthContext";
 import { OnboardingProvider } from "@/contexts/OnboardingContext";
@@ -7,7 +6,8 @@ import { ChatProvider } from "@/contexts/ChatContext";
 import { Toaster } from "@/components/ui/toaster";
 import Footer from "@/components/Footer";
 
-const inter = Inter({ subsets: ['latin'] });
+// Use system fonts as fallback to avoid Google Fonts loading issues
+const fontClass = 'font-sans';
 
 export const metadata: Metadata = {
   title: 'Agentify - Transform Any App Into An AI Agent',
@@ -21,7 +21,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className={fontClass}>
         <AuthProvider>
           <OnboardingProvider>
             <ChatProvider>
