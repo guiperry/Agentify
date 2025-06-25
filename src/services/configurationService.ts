@@ -20,6 +20,7 @@ export interface ProcessingResult {
     checksum: string;
   };
   errors?: string[];
+  warnings?: string[];
 }
 
 export interface ValidationResult {
@@ -386,7 +387,7 @@ class ConfigurationService {
       const result = {
         success: false, // Not fully complete yet
         steps,
-        message: 'Configuration processed up to compilation step. Manual compilation required.'
+        warnings: ['Configuration processed up to compilation step. Manual compilation required.']
       };
 
       console.log('Mock processing paused at compile step:', result);

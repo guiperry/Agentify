@@ -56,7 +56,15 @@ class DeploymentTracker {
       // Create a message listener for deployment updates
       this.messageListener = (message: any) => {
         if (message.type === 'deployment_update') {
-          this.handleWebhookUpdate(message.data);
+          // Extract deployment data from message (similar to compilation data extraction)
+          const deploymentData = message.data || {
+            deploymentId: (message as any).deploymentId,
+            status: (message as any).status,
+            progress: (message as any).progress,
+            message: (message as any).message,
+            timestamp: (message as any).timestamp
+          };
+          this.handleWebhookUpdate(deploymentData);
         }
       };
 
@@ -68,6 +76,12 @@ class DeploymentTracker {
   }
 
   private handleWebhookUpdate(payload: WebhookPayload) {
+    // Validate that this is actually a deployment update with required properties
+    if (!payload || !payload.deploymentId) {
+      console.warn('Received invalid deployment update payload:', payload);
+      return;
+    }
+
     const deployment = this.deployments.get(payload.deploymentId);
     if (deployment) {
       deployment.status = payload.status;

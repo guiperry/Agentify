@@ -172,11 +172,94 @@ const AgentConfig = ({
 
   const { toast } = useToast();
 
-  // WebSocket for real-time updates
-  const { sendCompilationUpdate, isConnected: wsConnected } = useWebSocket({
+  // WebSocket for real-time updates using singleton
+  const { sendMessage, sendCompilationUpdate, isConnected: wsConnected } = useWebSocket({
+    onMessage: (message) => {
+      console.log('🔔 Raw WebSocket message received:', message);
+    },
     onCompilationUpdate: (update) => {
-      console.log('Received compilation update:', update);
-      // You can add additional handling here if needed
+      console.log('🔔 Received compilation update:', update);
+
+      // Clone the exact logic from mock implementation callback
+      // Update processing steps
+      setProcessingSteps(prev => {
+        const updated = [...prev];
+        const index = updated.findIndex(s => s.id === update.step);
+
+        // Map WebSocket status to ProcessingStep status
+        const mapStatus = (wsStatus: string): 'pending' | 'running' | 'completed' | 'failed' => {
+          switch (wsStatus) {
+            case 'in_progress': return 'running';
+            case 'completed': return 'completed';
+            case 'error': return 'failed';
+            default: return 'pending';
+          }
+        };
+
+        if (index >= 0) {
+          updated[index] = {
+            ...updated[index],
+            status: mapStatus(update.status),
+            progress: update.progress || 0,
+            message: update.message
+          };
+        } else if (update.step && update.step !== 'initialization' && update.step !== 'error') {
+          updated.push({
+            id: update.step,
+            name: update.step,
+            status: mapStatus(update.status),
+            progress: update.progress || 0,
+            message: update.message
+          });
+        }
+        return updated;
+      });
+
+      // Update current processing tab for button display
+      if (update.step && update.status === 'in_progress') {
+        const stepNames: Record<string, string> = {
+          'validate': 'Identity',
+          'api-keys': 'API Keys',
+          'analyze': 'Personality',
+          'capabilities': 'Capabilities',
+          'compile': 'Compilation'
+        };
+        setCurrentProcessingTab(stepNames[update.step] || update.step);
+      }
+
+      // Update active tab based on current step (exactly like mock)
+      if (update.step === 'validate') {
+        setActiveTab('identity');
+        if (update.status === 'completed') {
+          setCompletedTabs(prev => new Set(prev).add('identity'));
+        }
+      } else if (update.step === 'api-keys') {
+        setActiveTab('api-keys');
+        if (update.status === 'completed') {
+          setCompletedTabs(prev => new Set(prev).add('api-keys'));
+        }
+      } else if (update.step === 'analyze') {
+        setActiveTab('personality');
+        if (update.status === 'completed') {
+          setCompletedTabs(prev => new Set(prev).add('personality'));
+        }
+      } else if (update.step === 'capabilities') {
+        setActiveTab('capabilities');
+        if (update.status === 'completed') {
+          setCompletedTabs(prev => new Set(prev).add('capabilities'));
+        }
+      } else if (update.step === 'compile') {
+        setActiveTab('compile');
+        if (update.status === 'in_progress') {
+          // Compile step started but not completed - set waiting state
+          setWaitingForCompilation(true);
+          setIsProcessingConfig(false); // Stop processing animation, start waiting
+          console.log('⏸️ Compilation paused, waiting for manual compilation');
+        } else if (update.status === 'completed') {
+          setCompletedTabs(prev => new Set(prev).add('compile'));
+          setWaitingForCompilation(false);
+        }
+      }
     }
   });
 
@@ -403,6 +486,7 @@ const AgentConfig = ({
   };
 
   const processConfiguration = async () => {
+    console.log('🚀 Process Configuration button clicked!');
     setIsProcessingConfig(true);
     setConfigProcessComplete(false);
     setProcessingSteps([]);
@@ -508,197 +592,168 @@ const AgentConfig = ({
         });
       }
 
-      // Use mock service for development, real service for production
-      const useRealBackend = process.env.NODE_ENV === 'production';
-      console.log('Using real backend:', useRealBackend);
-      console.log('Starting configuration processing with config:', config);
+      // Use WebSocket-based process configuration for real-time animation
+      console.log('🔧 WebSocket connected:', wsConnected);
+      console.log('🔧 Starting WebSocket-based configuration processing with config:', config);
 
-      const result = useRealBackend
-        ? await configurationService.processConfiguration(
-            config,
-            connectedApp.url,
-            (step: ProcessingStep) => {
-              setCurrentProcessingTab(step.name.toLowerCase());
-              setProcessingSteps(prev => {
-                const updated = [...prev];
-                const index = updated.findIndex(s => s.id === step.id);
-                if (index >= 0) {
-                  updated[index] = step;
-                } else {
-                  updated.push(step);
-                }
-                return updated;
-              });
+      // Set processing state to show button as disabled with running icon (regardless of WebSocket)
+      setIsProcessingConfig(true);
+      setCurrentProcessingTab('Initialization');
+      console.log('🔧 Button state set to processing: true');
 
-              // Send WebSocket update for each step
-              if (wsConnected) {
-                sendCompilationUpdate({
-                  step: step.id,
-                  progress: step.progress,
-                  message: step.message || `${step.name} - ${step.status}`,
-                  status: step.status === 'running' ? 'in_progress' :
-                         step.status === 'completed' ? 'completed' : 'error'
-                });
+      if (wsConnected) {
+        // Send process configuration request via WebSocket
+        const wsMessage = {
+          type: 'start_process_configuration',
+          data: config,
+          timestamp: new Date().toISOString()
+        };
+
+        console.log('📤 Sending WebSocket message via singleton:', wsMessage);
+        sendMessage(wsMessage);
+
+        // The WebSocket server will handle the process and send updates
+        // The onCompilationUpdate callback will handle the UI updates
+        console.log('✅ Process Configuration request sent via WebSocket singleton');
+
+        // Don't reset button state here - let WebSocket updates handle it
+        return; // Don't call API route, let WebSocket handle it
+      } else {
+        console.log('⚠️ WebSocket not connected, falling back to mock process');
+
+        // Fallback to mock process if WebSocket is not connected
+        const result = await configurationService.mockProcessConfigurationWithCompilePause(
+          config,
+          connectedApp.url,
+          (step: ProcessingStep) => {
+            setCurrentProcessingTab(step.name);
+            setProcessingSteps(prev => {
+              const updated = [...prev];
+              const index = updated.findIndex(s => s.id === step.id);
+              if (index >= 0) {
+                updated[index] = step;
+              } else {
+                updated.push(step);
               }
+              return updated;
+            });
 
-              // Update active tab based on current step
-              if (step.id === 'validate') {
-                setActiveTab('identity');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('identity'));
-                }
-              } else if (step.id === 'api-keys') {
-                setActiveTab('api-keys');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('api-keys'));
-                }
-              } else if (step.id === 'analyze') {
-                setActiveTab('personality');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('personality'));
-                }
-              } else if (step.id === 'capabilities') {
-                setActiveTab('capabilities');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('capabilities'));
-                }
-              } else if (step.id === 'compile') {
-                setActiveTab('compile');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('compile'));
-                }
-              } else if (step.id === 'test') {
-                setActiveTab('test');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('test'));
-                }
+            // Update active tab based on current step
+            if (step.id === 'validate') {
+              setActiveTab('identity');
+              if (step.status === 'completed') {
+                setCompletedTabs(prev => new Set(prev).add('identity'));
               }
-            }
-          )
-        : await configurationService.mockProcessConfigurationWithCompilePause(
-            config,
-            connectedApp.url,
-            (step: ProcessingStep) => {
-              setCurrentProcessingTab(step.name);
-              setProcessingSteps(prev => {
-                const updated = [...prev];
-                const index = updated.findIndex(s => s.id === step.id);
-                if (index >= 0) {
-                  updated[index] = step;
-                } else {
-                  updated.push(step);
-                }
-                return updated;
-              });
-
-              // Send WebSocket update for each step (mock version)
-              if (wsConnected) {
-                sendCompilationUpdate({
-                  step: step.id,
-                  progress: step.progress,
-                  message: step.message || `${step.name} - ${step.status}`,
-                  status: step.status === 'running' ? 'in_progress' :
-                         step.status === 'completed' ? 'completed' : 'error'
-                });
+            } else if (step.id === 'api-keys') {
+              setActiveTab('api-keys');
+              if (step.status === 'completed') {
+                setCompletedTabs(prev => new Set(prev).add('api-keys'));
               }
-
-              // Update active tab based on current step
-              if (step.id === 'validate') {
-                setActiveTab('identity');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('identity'));
-                }
-              } else if (step.id === 'api-keys') {
-                setActiveTab('api-keys');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('api-keys'));
-                }
-              } else if (step.id === 'analyze') {
-                setActiveTab('personality');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('personality'));
-                }
-              } else if (step.id === 'capabilities') {
-                setActiveTab('capabilities');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('capabilities'));
-                }
-              } else if (step.id === 'compile') {
-                setActiveTab('compile');
-                if (step.status === 'running') {
-                  setWaitingForCompilation(true);
-                } else if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('compile'));
-                  setWaitingForCompilation(false);
-                }
-              } else if (step.id === 'test') {
-                setActiveTab('test');
-                if (step.status === 'completed') {
-                  setCompletedTabs(prev => new Set(prev).add('test'));
-                }
+            } else if (step.id === 'analyze') {
+              setActiveTab('personality');
+              if (step.status === 'completed') {
+                setCompletedTabs(prev => new Set(prev).add('personality'));
+              }
+            } else if (step.id === 'capabilities') {
+              setActiveTab('capabilities');
+              if (step.status === 'completed') {
+                setCompletedTabs(prev => new Set(prev).add('capabilities'));
+              }
+            } else if (step.id === 'compile') {
+              setActiveTab('compile');
+              if (step.status === 'running') {
+                setWaitingForCompilation(true);
+              } else if (step.status === 'completed') {
+                setCompletedTabs(prev => new Set(prev).add('compile'));
+                setWaitingForCompilation(false);
               }
             }
+          }
+        );
+
+        // Handle the result from fallback
+        console.log('Fallback result:', result);
+
+        // Process the fallback result
+        if (result.success) {
+          setConfigProcessComplete(true);
+          toast({
+            title: "Configuration Processing Complete",
+            description: "All configuration steps have been processed successfully. You can now mint your agent.",
+          });
+        } else {
+          // Check if the failure is compilation-related
+          const isCompilationFailure = result.errors?.some(error =>
+            error.toLowerCase().includes('compil') ||
+            error.toLowerCase().includes('build')
+          ) || result.warnings?.some(warning =>
+            warning.toLowerCase().includes('compil')
           );
 
-      console.log('Processing result:', result);
+          // If compilation failed, navigate to compiler logs tab
+          if (isCompilationFailure) {
+            console.log('🔧 Compilation failure detected, navigating to compiler logs tab');
+            setActiveTab('compile');
 
-      if (result.success) {
-        setConfigProcessComplete(true);
-
-        // Send final success WebSocket update
-        if (wsConnected) {
-          sendCompilationUpdate({
-            step: 'complete',
-            progress: 100,
-            message: 'Configuration processing completed successfully!',
-            status: 'completed'
-          });
+            toast({
+              title: "Compilation Failed",
+              description: "Please check the Compiler Logs tab for troubleshooting information.",
+              variant: "destructive",
+            });
+          } else {
+            toast({
+              title: "Processing Failed",
+              description: result.errors?.join(', ') || "Configuration processing failed.",
+              variant: "destructive",
+            });
+          }
         }
+      }
+
+      // When using WebSocket, the process configuration is handled by the WebSocket server
+      // Success/failure notifications will come through WebSocket updates
+      console.log('✅ Process Configuration workflow initiated via WebSocket');
+    } catch (error) {
+      console.error('Configuration processing error:', error);
+
+      // Check if the error is compilation-related
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const isCompilationError = errorMessage.toLowerCase().includes('compil') ||
+                                errorMessage.toLowerCase().includes('build');
+
+      // If compilation error, navigate to compiler logs tab
+      if (isCompilationError) {
+        console.log('🔧 Compilation error detected, navigating to compiler logs tab');
+        setActiveTab('compile');
 
         toast({
-          title: "Configuration Processing Complete",
-          description: "All configuration steps have been processed successfully. You can now mint your agent.",
+          title: "Compilation Error",
+          description: "Please check the Compiler Logs tab for troubleshooting information.",
+          variant: "destructive",
         });
       } else {
-        console.error('Processing failed with result:', result);
-
-        // Send failure WebSocket update
-        if (wsConnected) {
-          sendCompilationUpdate({
-            step: 'error',
-            progress: 0,
-            message: result.errors?.join(', ') || "Configuration processing failed",
-            status: 'error'
-          });
-        }
-
         toast({
-          title: "Processing Failed",
-          description: result.errors?.join(', ') || "Configuration processing failed.",
+          title: "Processing Error",
+          description: "An unexpected error occurred during processing.",
           variant: "destructive",
         });
       }
-    } catch (error) {
-      console.error('Configuration processing error:', error);
 
       // Send error WebSocket update
       if (wsConnected) {
         sendCompilationUpdate({
           step: 'error',
           progress: 0,
-          message: `Processing error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          message: `Processing error: ${errorMessage}`,
           status: 'error'
         });
       }
-
-      toast({
-        title: "Processing Error",
-        description: "An unexpected error occurred during processing.",
-        variant: "destructive",
-      });
     } finally {
-      setIsProcessingConfig(false);
-      setCurrentProcessingTab('');
+      // Only reset button state if not using WebSocket (WebSocket will handle state updates)
+      if (!wsConnected) {
+        setIsProcessingConfig(false);
+        setCurrentProcessingTab('');
+      }
     }
   };
 
@@ -884,9 +939,9 @@ const AgentConfig = ({
             <TabsList className="grid w-full grid-cols-6 bg-white/5 border border-white/10">
               <TabsTrigger value="identity" className="data-[state=active]:bg-purple-500/20">
                 {completedTabs.has('identity') ? (
-                  <CheckCircle className="h-4 w-4 mr-2 text-green-400" />
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-400 flex-shrink-0" />
                 ) : (
-                  <Bot className="h-4 w-4 mr-2" />
+                  <Bot className="h-4 w-4 mr-2 flex-shrink-0" />
                 )}
                 Identity
               </TabsTrigger>
@@ -896,9 +951,9 @@ const AgentConfig = ({
                 className={`data-[state=active]:bg-purple-500/20 ${!agentRegistered ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {completedTabs.has('api-keys') ? (
-                  <CheckCircle className="h-4 w-4 mr-2 text-green-400" />
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-400 flex-shrink-0" />
                 ) : (
-                  <Key className="h-4 w-4 mr-2" />
+                  <Key className="h-4 w-4 mr-2 flex-shrink-0" />
                 )}
                 API Keys
               </TabsTrigger>
@@ -908,9 +963,9 @@ const AgentConfig = ({
                 className={`data-[state=active]:bg-purple-500/20 ${!agentRegistered ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {completedTabs.has('personality') ? (
-                  <CheckCircle className="h-4 w-4 mr-2 text-green-400" />
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-400 flex-shrink-0" />
                 ) : (
-                  <Settings className="h-4 w-4 mr-2" />
+                  <Settings className="h-4 w-4 mr-2 flex-shrink-0" />
                 )}
                 Personality
               </TabsTrigger>
@@ -920,9 +975,9 @@ const AgentConfig = ({
                 className={`data-[state=active]:bg-purple-500/20 ${!agentRegistered ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {completedTabs.has('capabilities') ? (
-                  <CheckCircle className="h-4 w-4 mr-2 text-green-400" />
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-400 flex-shrink-0" />
                 ) : (
-                  <Brain className="h-4 w-4 mr-2" />
+                  <Brain className="h-4 w-4 mr-2 flex-shrink-0" />
                 )}
                 Capabilities
               </TabsTrigger>
@@ -932,9 +987,9 @@ const AgentConfig = ({
                 className={`data-[state=active]:bg-purple-500/20 ${!agentRegistered ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {completedTabs.has('compile') ? (
-                  <CheckCircle className="h-4 w-4 mr-2 text-green-400" />
+                  <CheckCircle className="h-4 w-4 mr-2 text-green-400 flex-shrink-0" />
                 ) : (
-                  <Code className="h-4 w-4 mr-2" />
+                  <Code className="h-4 w-4 mr-2 flex-shrink-0" />
                 )}
                 Compile
               </TabsTrigger>

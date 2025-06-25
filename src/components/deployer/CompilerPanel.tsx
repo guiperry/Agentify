@@ -277,7 +277,7 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
         // Add download link if plugin was created
         if (result.success && result.downloadUrl) {
           addLogEntry(`Plugin ready for download: ${result.filename}`);
-          addLogEntry(`<a href="${result.downloadUrl}" target="_blank" style="color: #8b5cf6;">Click here to download the plugin</a>`);
+          addLogEntry(`Download URL: ${result.downloadUrl}`);
         }
         
         // Notify parent component

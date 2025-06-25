@@ -12,7 +12,8 @@ interface CompilationUpdate {
   step: string;
   progress: number;
   message: string;
-  status: 'in_progress' | 'completed' | 'error';
+  status: 'in_progress' | 'completed' | 'error' | 'waiting';
+  tab?: string; // Optional tab property for navigation
 }
 
 interface DeploymentUpdate {
@@ -112,7 +113,7 @@ class WebSocketManager {
       return;
     }
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws';
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3002/ws';
 
     try {
       console.log('Establishing WebSocket connection to:', wsUrl);
@@ -239,10 +240,25 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       // Handle specific message types
       switch (message.type) {
         case 'compilation_update':
-          onCompilationUpdate?.(message.data);
+          // Extract compilation data from message (server sends data directly in message object)
+          const compilationData = message.data || {
+            step: (message as any).step,
+            progress: (message as any).progress,
+            message: (message as any).message,
+            status: (message as any).status,
+            tab: (message as any).tab
+          };
+          onCompilationUpdate?.(compilationData);
           break;
         case 'deployment_update':
-          onDeploymentUpdate?.(message.data);
+          // Extract deployment data from message
+          const deploymentData = message.data || {
+            deploymentId: (message as any).deploymentId,
+            status: (message as any).status,
+            progress: (message as any).progress,
+            message: (message as any).message
+          };
+          onDeploymentUpdate?.(deploymentData);
           break;
         case 'connection':
           console.log('WebSocket connection confirmed:', message);

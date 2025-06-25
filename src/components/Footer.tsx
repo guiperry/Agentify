@@ -123,10 +123,25 @@ const Footer = () => {
                 <Link href="/cookie-policy" className="hover:text-white transition-colors">Cookie Policy</Link>
               </div>
             </div>
-            <div className="flex items-center space-x-1 text-sm text-white/60">
-              <span>Made with</span>
-              <Heart className="h-4 w-4 text-red-400" />
-              <span>for the future of AI</span>
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-1 text-sm text-white/60">
+                <span>Made with</span>
+                <Heart className="h-4 w-4 text-red-400" />
+                <span>for the future of AI</span>
+              </div>
+              <a
+                href="https://bolt.new"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="opacity-70 hover:opacity-100 transition-opacity"
+                aria-label="Powered by Bolt"
+              >
+                <img
+                  src="/bolt_poweredby_360w.png"
+                  alt="Powered by Bolt"
+                  className="h-8 w-auto"
+                />
+              </a>
             </div>
           </div>
         </div>
