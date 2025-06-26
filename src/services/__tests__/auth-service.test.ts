@@ -1,4 +1,4 @@
-import { authService } from '../auth-service';
+import { supabaseAuthService } from '../supabase-auth-service';
 
 // Mock localStorage
 const localStorageMock = {
@@ -11,7 +11,7 @@ Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,
 });
 
-describe('AuthService', () => {
+describe('SupabaseAuthService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     localStorageMock.getItem.mockReturnValue(null);
@@ -19,7 +19,7 @@ describe('AuthService', () => {
 
   describe('getAuthState', () => {
     it('should return initial unauthenticated state', () => {
-      const state = authService.getAuthState();
+      const state = supabaseAuthService.getAuthState();
       expect(state).toEqual({
         isAuthenticated: false,
         user: null,
@@ -44,7 +44,7 @@ describe('AuthService', () => {
         picture: 'https://example.com/picture.jpg'
       }));
 
-      const user = await authService.handleGoogleLoginSuccess(mockCredentialResponse);
+      const user = await supabaseAuthService.handleGoogleLoginSuccess(mockCredentialResponse);
 
       expect(user).toEqual({
         id: '1234567890',
@@ -68,7 +68,7 @@ describe('AuthService', () => {
         credential: 'invalid-jwt-token'
       };
 
-      await expect(authService.handleGoogleLoginSuccess(mockCredentialResponse))
+      await expect(supabaseAuthService.handleGoogleLoginSuccess(mockCredentialResponse))
         .rejects.toThrow('Failed to decode Google JWT token');
     });
   });
@@ -89,14 +89,14 @@ describe('AuthService', () => {
         picture: 'https://example.com/picture.jpg'
       }));
 
-      await authService.handleGoogleLoginSuccess(mockCredentialResponse);
+      await supabaseAuthService.handleGoogleLoginSuccess(mockCredentialResponse);
 
       // Now logout
-      await authService.logout();
+      await supabaseAuthService.logout();
 
       expect(localStorageMock.removeItem).toHaveBeenCalledWith('agentify_user');
-      expect(authService.getCurrentUser()).toBeNull();
-      expect(authService.isAuthenticated()).toBe(false);
+      expect(supabaseAuthService.getCurrentUser()).toBeNull();
+      expect(supabaseAuthService.isAuthenticated()).toBe(false);
 
       // Restore original atob
       global.atob = originalAtob;
@@ -105,7 +105,7 @@ describe('AuthService', () => {
 
   describe('validateToken', () => {
     it('should return false when no user is logged in', async () => {
-      const isValid = await authService.validateToken();
+      const isValid = await supabaseAuthService.validateToken();
       expect(isValid).toBe(false);
     });
 
@@ -124,8 +124,8 @@ describe('AuthService', () => {
         picture: 'https://example.com/picture.jpg'
       }));
 
-      await authService.handleGoogleLoginSuccess(mockCredentialResponse);
-      const isValid = await authService.validateToken();
+      await supabaseAuthService.handleGoogleLoginSuccess(mockCredentialResponse);
+      const isValid = await supabaseAuthService.validateToken();
       expect(isValid).toBe(true);
 
       // Restore original atob
