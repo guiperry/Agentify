@@ -20,7 +20,7 @@ import ImportConfigModal from "@/components/ImportConfigModal";
 import ExportConfigModal from "@/components/ExportConfigModal";
 import { parseConfigFile } from "@/services";
 import { configurationService, ProcessingStep } from "@/services/configurationService";
-import { useWebSocket } from "@/hooks/useWebSocket";
+import { useSSE } from "@/hooks/useSSE";
 
 export interface AgentFacts {
   id: string;
@@ -172,23 +172,25 @@ const AgentConfig = ({
 
   const { toast } = useToast();
 
-  // WebSocket for real-time updates using singleton
-  const { sendMessage, sendCompilationUpdate, isConnected: wsConnected } = useWebSocket({
+  // SSE for real-time updates using singleton
+  const { isConnected: sseConnected } = useSSE({
     onMessage: (message) => {
-      console.log('🔔 Raw WebSocket message received:', message);
+      console.log('🔔 Raw SSE message received:', message);
+      if (message.type === 'compilation_update') {
+        setCompilationLogs(prev => [...prev, message.data]);
+      }
     },
     onCompilationUpdate: (update) => {
       console.log('🔔 Received compilation update:', update);
 
-      // Clone the exact logic from mock implementation callback
       // Update processing steps
       setProcessingSteps(prev => {
         const updated = [...prev];
         const index = updated.findIndex(s => s.id === update.step);
 
-        // Map WebSocket status to ProcessingStep status
-        const mapStatus = (wsStatus: string): 'pending' | 'running' | 'completed' | 'failed' => {
-          switch (wsStatus) {
+        // Map SSE status to ProcessingStep status
+        const mapStatus = (sseStatus: string): 'pending' | 'running' | 'completed' | 'failed' => {
+          switch (sseStatus) {
             case 'in_progress': return 'running';
             case 'completed': return 'completed';
             case 'error': return 'failed';
@@ -494,8 +496,29 @@ const AgentConfig = ({
     setCompletedTabs(new Set()); // Reset completed tabs
     setWaitingForCompilation(false); // Reset waiting state
 
-    // Send initial WebSocket update
-    if (wsConnected) {
+    // Send initial SSE update
+    const sendCompilationUpdate = (update: {
+      step: string;
+      progress: number;
+      message: string;
+      status: string;
+    }) => {
+      if (sseConnected) {
+        fetch('/.netlify/functions/compile-stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'compilation_update',
+            data: update
+          }),
+        });
+      }
+    };
+  
+    // Send initial SSE update
+    if (sseConnected) {
       sendCompilationUpdate({
         step: 'initialization',
         progress: 0,
@@ -509,14 +532,12 @@ const AgentConfig = ({
       console.log('Starting validation with agent facts:', agentFacts);
 
       // Send validation start update
-      if (wsConnected) {
-        sendCompilationUpdate({
-          step: 'validation',
-          progress: 10,
-          message: 'Validating agent configuration...',
-          status: 'in_progress'
-        });
-      }
+      sendCompilationUpdate({
+        step: 'validation',
+        progress: 10,
+        message: 'Validating agent configuration...',
+        status: 'in_progress'
+      });
 
       const validation = await configurationService.validateAgentFacts(agentFacts);
       console.log('Validation result:', validation);
@@ -526,7 +547,7 @@ const AgentConfig = ({
         console.error('Validation failed with errors:', validation.errors);
 
         // Send validation failure update
-        if (wsConnected) {
+        if (sseConnected) {
           sendCompilationUpdate({
             step: 'validation',
             progress: 10,
@@ -545,27 +566,23 @@ const AgentConfig = ({
       }
 
       // Send validation success update
-      if (wsConnected) {
-        sendCompilationUpdate({
-          step: 'validation',
-          progress: 25,
-          message: 'Agent configuration validated successfully',
-          status: 'completed'
-        });
-      }
+      sendCompilationUpdate({
+        step: 'validation',
+        progress: 25,
+        message: 'Agent configuration validated successfully',
+        status: 'completed'
+      });
 
       // Clear any previous validation errors
       setValidationErrors({});
 
       // Send configuration preparation update
-      if (wsConnected) {
-        sendCompilationUpdate({
-          step: 'configuration',
-          progress: 35,
-          message: 'Preparing agent configuration...',
-          status: 'in_progress'
-        });
-      }
+      sendCompilationUpdate({
+        step: 'configuration',
+        progress: 35,
+        message: 'Preparing agent configuration...',
+        status: 'in_progress'
+      });
 
       // Create configuration object
       const config: AgentConfiguration = {
@@ -583,43 +600,44 @@ const AgentConfig = ({
       };
 
       // Send configuration ready update
-      if (wsConnected) {
-        sendCompilationUpdate({
-          step: 'configuration',
-          progress: 45,
-          message: 'Agent configuration prepared successfully',
-          status: 'completed'
-        });
-      }
+      sendCompilationUpdate({
+        step: 'configuration',
+        progress: 45,
+        message: 'Agent configuration prepared successfully',
+        status: 'completed'
+      });
 
-      // Use WebSocket-based process configuration for real-time animation
-      console.log('🔧 WebSocket connected:', wsConnected);
-      console.log('🔧 Starting WebSocket-based configuration processing with config:', config);
+      // Use SSE-based process configuration for real-time animation
+      console.log('🔧 SSE connected:', sseConnected);
+      console.log('🔧 Starting SSE-based configuration processing with config:', config);
 
       // Set processing state to show button as disabled with running icon (regardless of WebSocket)
       setIsProcessingConfig(true);
       setCurrentProcessingTab('Initialization');
       console.log('🔧 Button state set to processing: true');
 
-      if (wsConnected) {
-        // Send process configuration request via WebSocket
-        const wsMessage = {
-          type: 'start_process_configuration',
-          data: config,
-          timestamp: new Date().toISOString()
-        };
+      if (sseConnected) {
+        // Send process configuration request via SSE
+        fetch('/.netlify/functions/compile-stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'start_process_configuration',
+            data: config,
+            timestamp: new Date().toISOString()
+          }),
+        });
 
-        console.log('📤 Sending WebSocket message via singleton:', wsMessage);
-        sendMessage(wsMessage);
-
-        // The WebSocket server will handle the process and send updates
+        // The SSE server will handle the process and send updates
         // The onCompilationUpdate callback will handle the UI updates
-        console.log('✅ Process Configuration request sent via WebSocket singleton');
+        console.log('✅ Process Configuration request sent via SSE singleton');
 
         // Don't reset button state here - let WebSocket updates handle it
         return; // Don't call API route, let WebSocket handle it
       } else {
-        console.log('⚠️ WebSocket not connected, falling back to mock process');
+        console.log('⚠️ SSE not connected, falling back to mock process');
 
         // Fallback to mock process if WebSocket is not connected
         const result = await configurationService.mockProcessConfigurationWithCompilePause(
@@ -739,18 +757,16 @@ const AgentConfig = ({
         });
       }
 
-      // Send error WebSocket update
-      if (wsConnected) {
-        sendCompilationUpdate({
-          step: 'error',
-          progress: 0,
-          message: `Processing error: ${errorMessage}`,
-          status: 'error'
-        });
-      }
+      // Send error SSE update
+      sendCompilationUpdate({
+        step: 'error',
+        progress: 0,
+        message: `Processing error: ${errorMessage}`,
+        status: 'error'
+      });
     } finally {
-      // Only reset button state if not using WebSocket (WebSocket will handle state updates)
-      if (!wsConnected) {
+      // Only reset button state if not using SSE (SSE will handle state updates)
+      if (!sseConnected) {
         setIsProcessingConfig(false);
         setCurrentProcessingTab('');
       }
@@ -1606,15 +1622,13 @@ const AgentConfig = ({
               )}
             </Button>
 
-            {/* WebSocket Status Indicator */}
-            {process.env.NEXT_PUBLIC_ENABLE_WEBSOCKET === 'true' && (
-              <div className="flex items-center space-x-2 text-sm">
-                <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`} />
-                <span className="text-white/70">
-                  WebSocket: {wsConnected ? 'Connected' : 'Disconnected'}
-                </span>
-              </div>
-            )}
+            {/* SSE Status Indicator */}
+            <div className="flex items-center space-x-2 text-sm">
+              <div className={`w-2 h-2 rounded-full ${sseConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+              <span className="text-white/70">
+                SSE: {sseConnected ? 'Connected' : 'Disconnected'}
+              </span>
+            </div>
           </div>
 
           {/* Processing Status - Only shown during processing */}

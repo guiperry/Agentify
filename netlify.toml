@@ -11,9 +11,9 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# Functions are automatically handled by the Next.js adapter
-# [functions]
-#   directory = "netlify/functions"
+# Enable Netlify Functions
+[functions]
+  directory = "netlify/functions"
 
 [build.environment]
   # Node.js version
@@ -45,6 +45,15 @@
 
   # Force case-sensitive module resolution
   FORCE_COLOR = "1"
+
+  # SSE Configuration (for real-time updates)
+  NEXT_PUBLIC_SSE_URL = "/.netlify/functions/stream"
+
+  # Supabase Configuration (set these in Netlify UI for security)
+  # NEXT_PUBLIC_SUPABASE_URL = "https://your-project.supabase.co"
+  # NEXT_PUBLIC_SUPABASE_ANON_KEY = "your-anon-key"
+  # SUPABASE_SERVICE_ROLE_KEY = "your-service-role-key"
+  # API_KEY_ENCRYPTION_KEY = "your-32-char-encryption-key"
 
 # Build processing settings
 [build.processing]

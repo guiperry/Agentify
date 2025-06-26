@@ -1,0 +1,97 @@
+# Supabase Configuration for Next-Agentify
+# This file configures the local Supabase development environment
+
+# Project configuration
+project_id = "movvczmmdmxalnpbptwx"
+
+[api]
+# Port for the local API server
+port = 54321
+# Schemas to expose in the API
+schemas = ["public", "storage", "graphql_public"]
+# Extra search path for schemas
+extra_search_path = ["public", "extensions"]
+# Max rows returned by a single query
+max_rows = 1000
+
+[db]
+# Port for the local database
+port = 54322
+# Major version of PostgreSQL to use
+major_version = 15
+# Shadow database for migrations (optional)
+shadow_port = 54320
+
+[studio]
+# Port for the local Supabase Studio
+port = 54323
+# Enable API docs
+api_url = "http://localhost:54321"
+
+[auth]
+# Enable user signups
+enable_signup = true
+# Site URL for redirects
+site_url = "http://localhost:3000"
+# Additional redirect URLs
+additional_redirect_urls = ["http://localhost:3000/auth/callback", "https://your-netlify-domain.netlify.app/auth/callback"]
+# JWT expiry time
+jwt_expiry = 3600
+# Enable email confirmations
+enable_confirmations = false
+# Enable email change confirmations
+enable_email_change_confirmations = true
+# Enable phone confirmations
+enable_phone_confirmations = false
+
+# External OAuth providers
+[auth.external.google]
+enabled = true
+client_id = "env(GOOGLE_CLIENT_ID)"
+secret = "env(GOOGLE_CLIENT_SECRET)"
+redirect_uri = "http://localhost:54321/auth/v1/callback"
+
+[auth.external.github]
+enabled = false
+
+[auth.external.apple]
+enabled = false
+
+# Email configuration
+[auth.email]
+# Enable email/password auth
+enable_signup = true
+# Enable magic links
+enable_confirmations = false
+# Secure email change flow
+secure_email_change_enabled = true
+# Double confirm email changes
+double_confirm_changes = true
+
+# SMS configuration
+[auth.sms]
+# Enable phone/SMS auth
+enable_signup = false
+# Enable phone confirmations
+enable_confirmations = false
+
+# Storage configuration
+[storage]
+# File size limit (in bytes)
+file_size_limit = 52428800  # 50MB
+# Allowed MIME types
+allowed_mime_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "application/octet-stream", "application/zip"]
+
+# Edge Functions configuration
+[functions]
+# Import map for Deno
+import_map = "./functions/import_map.json"
+
+# Analytics configuration
+[analytics]
+enabled = false
+
+# Experimental features
+[experimental]
+# Enable webhooks
+webhooks = false
