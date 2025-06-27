@@ -45,3 +45,4 @@ next-env.d.ts
 public/releases/agentic-engine-v1.0.0-windows.exe
 public/releases/agentic-engine-v1.0.0-mac.dmg
 public/releases/agentic-engine-v1.0.0-linux.AppImage
+.env
