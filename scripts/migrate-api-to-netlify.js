@@ -81,10 +81,25 @@ function getNetlifyFunctionName(routePath) {
   return `${GENERATED_PREFIX}${converted}`;
 }
 
+// Check if route should be excluded from migration
+function shouldExcludeRoute(routePath) {
+  const excludedRoutes = [
+    // Add routes to exclude here if needed
+  ];
+
+  return excludedRoutes.some(excluded => routePath.includes(excluded));
+}
+
 // Extract route content and convert to Netlify function
 function convertRouteToNetlifyFunction(route) {
+  // Skip excluded routes
+  if (shouldExcludeRoute(route.routePath)) {
+    log(`⚠️  Skipped route: ${route.routePath} (excluded from migration)`, 'yellow');
+    return null;
+  }
+
   const content = fs.readFileSync(route.filePath, 'utf8');
-  
+
   // Extract imports and exports
   const imports = extractImports(content);
   const exports = extractExports(content);
@@ -143,12 +158,16 @@ function extractImports(content) {
 function convertModulePath(modulePath) {
   // Convert @/lib/... to relative paths from netlify/functions/ to src/lib/
   if (modulePath.startsWith('@/lib/')) {
-    return '../../src/lib/' + modulePath.substring(6);
+    const relativePath = '../../src/lib/' + modulePath.substring(6);
+    // Add .js extension for TypeScript files that will be compiled
+    return relativePath + '.js';
   }
 
   // Convert @/... to relative paths from netlify/functions/ to src/
   if (modulePath.startsWith('@/')) {
-    return '../../src/' + modulePath.substring(2);
+    const relativePath = '../../src/' + modulePath.substring(2);
+    // Add .js extension for TypeScript files that will be compiled
+    return relativePath + '.js';
   }
 
   // Keep other module paths as-is (npm packages, etc.)
@@ -532,6 +551,12 @@ async function migrateApiRoutes(options = {}) {
     for (const route of routes) {
       try {
         const func = convertRouteToNetlifyFunction(route);
+
+        // Skip if route was excluded
+        if (func === null) {
+          continue;
+        }
+
         functions.push(func);
 
         if (testMode) {
