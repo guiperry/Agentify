@@ -151,7 +151,7 @@ const AgentConfig = ({
   const [compilationComplete, setCompilationComplete] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
   const [compileStatus, setCompileStatus] = useState<'idle' | 'compiling' | 'success' | 'error'>('idle');
-  // Build target selection removed - always using WASM
+  const [selectedBuildTarget, setSelectedBuildTarget] = useState<'wasm' | 'go'>('wasm');
   const [agentRegistered, setAgentRegistered] = useState(false);
   const [activeTab, setActiveTab] = useState('identity');
 
@@ -511,7 +511,7 @@ const AgentConfig = ({
 
       const payload = {
         agentConfig,
-        buildTarget: 'wasm', // Always use WASM as build target
+        buildTarget: selectedBuildTarget,
         advancedSettings: {
           isolationLevel: 'process',
           memoryLimit: 512,
@@ -1653,6 +1653,17 @@ const AgentConfig = ({
           {/* Compile Agent Section */}
           <div className="mt-6 space-y-4">
             <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <label className="text-sm font-medium text-white">Build Target:</label>
+                <select
+                  value={selectedBuildTarget}
+                  onChange={(e) => setSelectedBuildTarget(e.target.value as 'wasm' | 'go')}
+                  className="bg-slate-700 border border-slate-600 text-white rounded px-3 py-1 text-sm"
+                >
+                  <option value="wasm">WebAssembly (WASM)</option>
+                  <option value="go">Go Plugin (Fallback)</option>
+                </select>
+              </div>
               <Button
                 onClick={handleCompile}
                 disabled={!agentRegistered || isCompiling}

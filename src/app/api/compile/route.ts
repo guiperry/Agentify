@@ -7,7 +7,7 @@ import { createGitHubActionsCompiler } from '@/lib/github-actions-compiler';
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-    const { agentConfig, advancedSettings, selectedPlatform } = payload;
+    const { agentConfig, advancedSettings, selectedPlatform, buildTarget } = payload;
 
     if (!agentConfig) {
       return NextResponse.json({
@@ -66,8 +66,8 @@ export async function POST(request: Request) {
       pluginConfig.subAgentCapabilities = advancedSettings.subAgentCapabilities;
     }
 
-    // Always use WASM as build target (Go plugin option deprecated)
-    pluginConfig.buildTarget = 'wasm';
+    // Set build target (default to WASM)
+    pluginConfig.buildTarget = buildTarget || 'wasm';
 
     // Handle platform-specific settings
     if (selectedPlatform === 'windows') {
