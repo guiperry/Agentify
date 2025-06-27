@@ -68,17 +68,16 @@ jobs:
     - name: Generate Go templates
       run: |
         cd /tmp/build-${{ inputs.job_id }}
-        
+
         # Create main.go from template
         cat > main.go << 'EOF'
         package main
-        
+
         import (
             "fmt"
-            "log"
             "os"
         )
-        
+
         func main() {
             fmt.Println("Agent Plugin Compiled Successfully")
             fmt.Printf("Job ID: %s\n", os.Getenv("JOB_ID"))
@@ -86,13 +85,16 @@ jobs:
             fmt.Printf("Platform: %s\n", os.Getenv("PLATFORM"))
         }
         EOF
-        
+
         # Create go.mod
         cat > go.mod << 'EOF'
         module agent-plugin
-        
+
         go 1.21
         EOF
+
+        # Initialize go module
+        go mod tidy
         
     - name: Generate Python service
       run: |
