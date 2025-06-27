@@ -5,9 +5,24 @@ import { sendCompilationUpdate } from '@/lib/websocket-utils';
 import { createGitHubActionsCompiler } from '@/lib/github-actions-compiler';
 
 export async function POST(request: Request) {
+  console.log('🚀 Compile function started');
+
   try {
     const payload = await request.json();
+    console.log('📦 Request body parsed successfully');
+
     const { agentConfig, advancedSettings, selectedPlatform, buildTarget } = payload;
+    console.log('🔧 Extracted config:', { hasAgentConfig: !!agentConfig, buildTarget, selectedPlatform });
+
+    // Check GitHub Actions configuration
+    const githubToken = process.env.GITHUB_TOKEN;
+    const githubOwner = process.env.GITHUB_OWNER;
+    const githubRepo = process.env.GITHUB_REPO;
+    console.log('🔑 GitHub config:', {
+      hasToken: !!githubToken,
+      owner: githubOwner || 'guiperry',
+      repo: githubRepo || 'next-agentify'
+    });
 
     if (!agentConfig) {
       return NextResponse.json({
@@ -95,7 +110,9 @@ export async function POST(request: Request) {
       // Try GitHub Actions fallback
       const githubCompiler = createGitHubActionsCompiler();
       if (!githubCompiler) {
-        throw new Error(`Compilation failed: ${localError instanceof Error ? localError.message : String(localError)}. GitHub Actions fallback is not configured - please contact support.`);
+        console.error('GitHub Actions compiler not available. Missing environment variables.');
+        console.error('Required: GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO');
+        throw new Error(`Compilation failed: ${localError instanceof Error ? localError.message : String(localError)}. GitHub Actions fallback is not configured. Please ensure GITHUB_TOKEN and other required environment variables are set in Netlify.`);
       }
 
       try {

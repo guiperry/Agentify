@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/health
-// Generated: 2025-06-27T21:18:06.233Z
+// Generated: 2025-06-27T22:25:41.252Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 

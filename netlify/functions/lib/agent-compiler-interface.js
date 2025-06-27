@@ -53,7 +53,7 @@ class AgentCompilerService {
 /**
  * Create a simplified compiler service for Netlify
  */
-function createAgentCompilerService() {
+async function createAgentCompilerService() {
   return new AgentCompilerService();
 }
 

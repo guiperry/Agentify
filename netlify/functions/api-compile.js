@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/compile
-// Generated: 2025-06-27T21:18:06.209Z
+// Generated: 2025-06-27T22:25:41.230Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createAgentCompilerService } = require('./lib/agent-compiler-interface.js');
@@ -31,9 +31,24 @@ async function POST(event, context) {
   }
   
 
+  console.log('🚀 Compile function started');
+
   try {
     const payload = requestBody;
+    console.log('📦 Request body parsed successfully');
+
     const { agentConfig, advancedSettings, selectedPlatform, buildTarget } = payload;
+    console.log('🔧 Extracted config:', { hasAgentConfig: !!agentConfig, buildTarget, selectedPlatform });
+
+    // Check GitHub Actions configuration
+    const githubToken = process.env.GITHUB_TOKEN;
+    const githubOwner = process.env.GITHUB_OWNER;
+    const githubRepo = process.env.GITHUB_REPO;
+    console.log('🔑 GitHub config:', {
+      hasToken: !!githubToken,
+      owner: githubOwner || 'guiperry',
+      repo: githubRepo || 'next-agentify'
+    });
 
     if (!agentConfig) {
       return {
@@ -125,7 +140,9 @@ async function POST(event, context) {
       // Try GitHub Actions fallback
       const githubCompiler = createGitHubActionsCompiler();
       if (!githubCompiler) {
-        throw new Error(`Compilation failed: ${localError instanceof Error ? localError.message : String(localError)}. GitHub Actions fallback is not configured - please contact support.`);
+        console.error('GitHub Actions compiler not available. Missing environment variables.');
+        console.error('Required, GITHUB_OWNER, GITHUB_REPO');
+        throw new Error(`Compilation failed: ${localError instanceof Error ? localError.message : String(localError)}. GitHub Actions fallback is not configured. Please ensure GITHUB_TOKEN and other required environment variables are set in Netlify.`);
       }
 
       try {
