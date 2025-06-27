@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/deploy
-// Generated: 2025-06-27T22:41:56.912Z
+// Generated: 2025-06-27T23:32:07.979Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 
@@ -30,7 +30,7 @@ async function POST(event, context) {
 
   try {
     const body: DeploymentRequest = requestBody;
-    const { deploymentId, agentName, version, environment } = body;
+    const { deploymentId, agentName, version, environment, deploymentType, pluginUrl, jobId, awsConfig } = body;
 
     // Validate required fields
     if (!deploymentId || !agentName || !version || !environment) {
@@ -41,28 +41,68 @@ async function POST(event, context) {
     };
     }
 
-    // Mock deployment process - in a real implementation, this would:
-    // 1. Validate the agent configuration
-    // 2. Build the agent
-    // 3. Deploy to the specified environment
-    // 4. Send updates via WebSocket
-    
     console.log(`Starting deployment: ${agentName} v${version} to ${environment}`);
     console.log(`Deployment ID: ${deploymentId}`);
+    console.log(`Deployment Type: ${deploymentType || 'cloud'}`);
 
-    // Simulate deployment process
-    setTimeout(() => {
-      console.log(`Deployment ${deploymentId} completed successfully`);
-    }, 5000);
+    if (deploymentType === 'blockchain-aws') {
+      // Blockchain AWS deployment with Ansible
+      if (!pluginUrl && !jobId) {
+        return {
+      statusCode: 400,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({error: 'Plugin URL or Job ID required for blockchain deployment'})
+    };
+      }
 
-    return {
+      console.log(`🔗 Starting blockchain deployment to AWS`);
+      console.log(`Plugin source: ${pluginUrl || `GitHub Actions job ${jobId}`}`);
+
+      if (awsConfig) {
+        console.log(`AWS Config: Region=${awsConfig.region}, Instance=${awsConfig.instanceType}, KeyPair=${awsConfig.keyPairName}`);
+      }
+
+      // Start blockchain deployment process
+      await startBlockchainDeployment({
+        deploymentId,
+        agentName,
+        version,
+        environment,
+        pluginUrl,
+        jobId,
+        awsConfig
+      });
+
+      return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({success: true,
-      deploymentId,
-      message: `Deployment of ${agentName} v${version} to ${environment} started`,
-      status: 'initiated'})
+        deploymentId,
+        message: `Blockchain deployment of ${agentName} v${version} to AWS ${environment} started`,
+        status: 'initiated',
+        deploymentType: 'blockchain-aws',
+        estimatedTime: '10-15 minutes'})
     };
+
+    } else {
+      // Standard cloud deployment
+      console.log(`☁️ Starting standard cloud deployment`);
+
+      // Simulate deployment process
+      setTimeout(() => {
+        console.log(`Deployment ${deploymentId} completed successfully`);
+      }, 5000);
+
+      return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({success: true,
+        deploymentId,
+        message: `Deployment of ${agentName} v${version} to ${environment} started`,
+        status: 'initiated',
+        deploymentType: 'cloud'})
+    };
+    }
 
   } catch (error) {
     console.error('Deployment API error:', error);

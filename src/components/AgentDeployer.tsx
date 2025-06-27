@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Rocket, Download, Cloud, Monitor, Activity, Clock } from "lucide-react";
 import DeploymentPanel from "@/components/deployer/DeploymentPanel";
+import BlockchainDeploymentPanel from "@/components/deployer/BlockchainDeploymentPanel";
 import LocalDeploymentGuide from "@/components/LocalDeploymentGuide";
 import { useToast } from "@/hooks/use-toast";
 import { deploymentTracker, DeploymentStatus } from "@/services/deploymentTracker";
@@ -19,6 +20,13 @@ interface AgentDeployerProps {
     personality: string;
     instructions: string;
     features: Record<string, boolean>;
+    compilationData?: {
+      success: boolean;
+      downloadUrl?: string;
+      filename?: string;
+      compilationMethod?: string;
+      jobId?: string;
+    };
     // Other relevant config properties
   };
   onDeployed: () => void;
@@ -29,6 +37,7 @@ interface AgentDeployerProps {
   onDownload: (platform: 'windows' | 'mac' | 'linux') => void;
   settingsModalOpen: boolean;
   setSettingsModalOpen: (open: boolean) => void;
+  // Note: Compilation data is now available in agentConfig.compilationData
 }
 
 const AgentDeployer = ({
@@ -48,6 +57,11 @@ const AgentDeployer = ({
   const [showLocalGuide, setShowLocalGuide] = useState(false);
   const [selectedPlatform, setSelectedPlatform] = useState<'windows' | 'mac' | 'linux'>('windows');
   const [isDeploymentComplete, setIsDeploymentComplete] = useState(false);
+
+  // Extract compilation data from agentConfig
+  const compilationData = agentConfig.compilationData;
+  const compiledPluginUrl = compilationData?.downloadUrl;
+  const compilationJobId = compilationData?.jobId;
 
   // Subscribe to deployment updates
   useEffect(() => {
@@ -170,16 +184,16 @@ const AgentDeployer = ({
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Cloud Deployment */}
         <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
           <CardHeader>
             <CardTitle className="text-white flex items-center">
               <Cloud className="h-5 w-5 mr-2 text-purple-400" />
-              Cloud Deployment
+              Cloud Deploy
             </CardTitle>
             <CardDescription className="text-white/70">
-              Deploy your agent to the cloud for global access
+              Deploy your agent to cloud platforms for global access
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -216,6 +230,8 @@ const AgentDeployer = ({
               repoUrl={connectedApp.url}
               agentConfig={agentConfig}
               onDeployComplete={() => handleDeploy('production')}
+              compiledPluginUrl={compiledPluginUrl}
+              compilationJobId={compilationJobId}
             />
           </CardContent>
         </Card>
@@ -225,10 +241,10 @@ const AgentDeployer = ({
           <CardHeader>
             <CardTitle className="text-white flex items-center">
               <Download className="h-5 w-5 mr-2 text-green-400" />
-              Local Deployment
+              Local Deploy
             </CardTitle>
             <CardDescription className="text-white/70">
-              Download Agentic Engine with your compiled agent plugin
+              Download and run your agent locally on your machine
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -269,12 +285,41 @@ const AgentDeployer = ({
                 <h5 className="text-white font-medium mb-2">What's included:</h5>
                 <ul className="text-white/70 text-sm space-y-1">
                   <li>• Agentic Engine desktop application</li>
-                  <li>• Your compiled agent plugin</li>
+                  <li>• Your compiled agent plugin{compilationData?.success ? ` (${compilationData.compilationMethod})` : ''}</li>
                   <li>• Desktop configuration instructions</li>
                   <li>• Local testing environment</li>
                 </ul>
+                {compilationData?.success && (
+                  <div className="mt-3 p-2 bg-green-900/20 border border-green-500/30 rounded">
+                    <div className="text-green-400 text-xs">
+                      ✓ Plugin compiled successfully
+                      {compilationData.filename && ` - ${compilationData.filename}`}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Blockchain Deployment */}
+        <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
+          <CardHeader>
+            <CardTitle className="text-white flex items-center">
+              <Activity className="h-5 w-5 mr-2 text-orange-400" />
+              Blockchain Deploy
+            </CardTitle>
+            <CardDescription className="text-white/70">
+              Deploy to custom blockchain application on AWS
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <BlockchainDeploymentPanel
+              agentConfig={agentConfig}
+              onDeployComplete={() => setIsDeploymentComplete(true)}
+              compiledPluginUrl={compiledPluginUrl}
+              compilationJobId={compilationJobId}
+            />
           </CardContent>
         </Card>
       </div>

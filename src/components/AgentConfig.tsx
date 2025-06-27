@@ -63,6 +63,13 @@ export interface AgentConfiguration {
   endpoints?: {
     [key: string]: string;
   };
+  compilationData?: {
+    success: boolean;
+    downloadUrl?: string;
+    filename?: string;
+    compilationMethod?: string;
+    jobId?: string;
+  };
 }
 
 interface AgentConfigProps {
@@ -149,6 +156,13 @@ const AgentConfig = ({
   const [configProcessComplete, setConfigProcessComplete] = useState(false);
   const [agentMinted, setAgentMinted] = useState(false);
   const [compilationComplete, setCompilationComplete] = useState(false);
+  const [compilationResult, setCompilationResult] = useState<{
+    success: boolean;
+    downloadUrl?: string;
+    filename?: string;
+    compilationMethod?: string;
+    jobId?: string;
+  } | null>(null);
   const [isCompiling, setIsCompiling] = useState(false);
   const [compileStatus, setCompileStatus] = useState<'idle' | 'compiling' | 'success' | 'error'>('idle');
   const [selectedBuildTarget, setSelectedBuildTarget] = useState<'wasm' | 'go'>('wasm');
@@ -435,7 +449,8 @@ const AgentConfig = ({
       settings: {
         creativity: creativity[0],
         mcpServers
-      }
+      },
+      compilationData: compilationResult || undefined
     };
 
     // Navigate to deploy step
@@ -1599,6 +1614,16 @@ const AgentConfig = ({
                 }}
                 onCompileComplete={(result) => {
                   console.log("Compilation result:", result);
+
+                  // Store compilation data for deployment
+                  setCompilationResult({
+                    success: result.success,
+                    downloadUrl: result.downloadUrl,
+                    filename: result.filename,
+                    compilationMethod: result.compilationMethod,
+                    jobId: result.jobId
+                  });
+
                   if (result.success) {
                     setCompilationComplete(true);
 

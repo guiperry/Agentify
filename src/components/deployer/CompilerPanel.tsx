@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -100,6 +100,7 @@ export interface CompilerResult {
   message: string;
   logs?: string[];
   compilationMethod?: string;
+  jobId?: string;
 }
 
 interface CompilerPanelProps {
@@ -123,12 +124,22 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
     useChromemGo: true,
     subAgentCapabilities: false
   });
-  const [compileLog, setCompileLog] = useState<string[]>([]);
+  const [compileLog, setCompileLog] = useState<{message: string, timestamp: string}[]>([]);
+  const [activeTab, setActiveTab] = useState("basic");
+  const logContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  
+
   const addLogEntry = useCallback((message: string) => {
-    setCompileLog(prev => [...prev, message]);
+    const timestamp = new Date().toLocaleTimeString();
+    setCompileLog(prev => [...prev, { message, timestamp }]);
   }, []);
+
+  // Auto-scroll to bottom when new logs are added
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [compileLog]);
   
   // The frontend can indicate it's ready, but actual dependency checks
   // and service initialization happen on the backend.
@@ -156,7 +167,7 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
 
     while (attempts < maxAttempts) {
       try {
-        addLogEntry(`Checking compilation status... (${attempts + 1}/${maxAttempts})`);
+        addLogEntry(`🔍 Checking compilation status... (${attempts + 1}/${maxAttempts})`);
 
         const statusResponse = await fetch(`/api/compile/status?jobId=${encodeURIComponent(jobId)}`);
         const statusResult = await statusResponse.json();
@@ -167,9 +178,17 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
 
         if (statusResult.status === 'completed') {
           // Compilation completed successfully
-          addLogEntry("GitHub Actions compilation completed successfully!");
+          addLogEntry("🎉 GitHub Actions compilation completed successfully!");
+
+          // Show download info
+          addLogEntry("📦 Compilation package contains:");
+          addLogEntry("  • 🔧 WASM plugin file");
+          addLogEntry("  • 🐍 Python service component");
+          addLogEntry("  • ⚙️ Configuration files");
+          addLogEntry("📥 Download the complete package as a zip file");
+
           if (statusResult.downloadUrl) {
-            addLogEntry(`Download URL: ${statusResult.downloadUrl}`);
+            addLogEntry(`Package ready for download`);
           }
 
           setCompileProgress(100);
@@ -179,6 +198,7 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
             message: 'GitHub Actions compilation completed successfully',
             compilationMethod: 'github-actions',
             downloadUrl: statusResult.downloadUrl,
+            filename: `agent-plugin-${jobId}.zip`,
             logs: statusResult.logs || []
           });
 
@@ -187,7 +207,9 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
             success: true,
             message: 'GitHub Actions compilation completed successfully',
             compilationMethod: 'github-actions',
-            downloadUrl: statusResult.downloadUrl
+            downloadUrl: statusResult.downloadUrl,
+            filename: `agent-plugin-${jobId}.zip`,
+            jobId: jobId
           });
 
           // Show success toast
@@ -197,6 +219,8 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
             variant: "default",
           });
 
+          // Set isCompiling to false since compilation is complete
+          setIsCompiling(false);
           return; // Exit polling loop
         } else if (statusResult.status === 'failed') {
           // Compilation failed
@@ -240,6 +264,8 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
             variant: "destructive",
           });
 
+          // Set isCompiling to false since compilation failed
+          setIsCompiling(false);
           return;
         }
       }
@@ -265,6 +291,9 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
       description: "Compilation monitoring timed out. Check GitHub Actions tab for status.",
       variant: "destructive",
     });
+
+    // Set isCompiling to false since monitoring timed out
+    setIsCompiling(false);
   };
 
   const handleCompile = async () => {
@@ -273,11 +302,15 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
     setCompileProgress(0);
     setCompileLog([]);
 
+    // Automatically navigate to compiler logs tab
+    setActiveTab("logs");
+
     try {
       // Add initial log entries
-      addLogEntry("Starting compilation process...");
-      addLogEntry(`Target platform: ${selectedPlatform}`);
-      addLogEntry(`Agent name: ${agentConfig.name}`);
+      addLogEntry("🚀 Starting compilation process...");
+      addLogEntry(`📋 Target platform: ${selectedPlatform}`);
+      addLogEntry(`🤖 Agent name: ${agentConfig.name}`);
+      addLogEntry("📂 Switched to Compiler Logs tab automatically");
       
       // Create a UI config object that matches the expected format for conversion
       const uiConfigForConversion = {
@@ -303,12 +336,12 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
           setCompileProgress(progress);
           
           // Add log entries for each progress step
-          if (progress === 10) addLogEntry("Creating build directory...");
-          if (progress === 20) addLogEntry("Generating Go code from templates...");
-          if (progress === 40) addLogEntry("Embedding resources and prompts...");
-          if (progress === 60) addLogEntry("Generating Python agent service...");
-          if (progress === 80) addLogEntry("Compiling Go plugin...");
-          if (progress === 100) addLogEntry("Compilation complete!");
+          if (progress === 10) addLogEntry("📁 Creating build directory...");
+          if (progress === 20) addLogEntry("⚙️ Generating Go code from templates...");
+          if (progress === 40) addLogEntry("📦 Embedding resources and prompts...");
+          if (progress === 60) addLogEntry("🐍 Generating Python agent service...");
+          if (progress === 80) addLogEntry("🔨 Compiling Go plugin...");
+          if (progress === 100) addLogEntry("✅ Compilation complete!");
           
           currentStep++;
         } else {
@@ -374,12 +407,26 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
         
         // Check if this is a GitHub Actions compilation that needs polling
         if (result.compilationMethod === 'github-actions' && result.status === 'in_progress' && result.jobId) {
-          addLogEntry("GitHub Actions compilation started. Polling for completion...");
-          addLogEntry(`Job ID: ${result.jobId}`);
-          addLogEntry(`Monitor progress: ${result.githubActionsUrl}`);
+          addLogEntry("🔄 GitHub Actions compilation started. Polling for completion...");
+          addLogEntry(`🆔 Job ID: ${result.jobId}`);
+          addLogEntry(`🔗 Monitor progress: ${result.githubActionsUrl}`);
 
-          // Start polling for completion
+          // Set intermediate state - compilation is still in progress via GitHub Actions
+          setCompileProgress(85); // Show we're in GitHub Actions phase
+          setCompileStatus('compiling'); // Keep compiling state
+
+          // Set a temporary result to show GitHub Actions is in progress
+          setCompileResult({
+            success: false, // Not complete yet
+            message: 'GitHub Actions compilation in progress...',
+            compilationMethod: 'github-actions'
+          });
+
+          // Don't call onCompileComplete yet - we're still compiling via GitHub Actions
+          // Don't set isCompiling to false yet - we're still compiling via GitHub Actions
+          // Start polling for completion (this will update the final state and call onCompileComplete when done)
           await pollGitHubActionsCompletion(result.jobId);
+          return; // Exit early to avoid the finally block setting isCompiling to false
         } else {
           // Local compilation completed immediately or GitHub Actions returned final result
           setCompileResult(result);
@@ -450,7 +497,7 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
 
   return (
     <div className="space-y-6">
-      <Tabs defaultValue="basic" className="space-y-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="grid w-full grid-cols-3 bg-slate-800/50 border-slate-700">
           <TabsTrigger value="basic">Basic Settings</TabsTrigger>
           <TabsTrigger value="advanced">Advanced Settings</TabsTrigger>
@@ -662,11 +709,14 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="bg-slate-900 border border-slate-700 rounded-md p-4 h-[400px] overflow-y-auto font-mono text-sm text-slate-300">
+              <div
+                ref={logContainerRef}
+                className="bg-slate-900 border border-slate-700 rounded-md p-4 h-[400px] overflow-y-auto font-mono text-sm text-slate-300"
+              >
                 {compileLog.length > 0 ? (
                   compileLog.map((log, index) => (
                     <div key={index} className="py-1">
-                      <span className="text-slate-500">[{new Date().toLocaleTimeString()}]</span> {log}
+                      <span className="text-slate-500">[{log.timestamp}]</span> {log.message}
                     </div>
                   ))
                 ) : (

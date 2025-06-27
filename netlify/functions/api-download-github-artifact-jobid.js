@@ -1,10 +1,9 @@
 // Auto-generated Netlify function from Next.js API route
-// Original route: /api/download/plugin/[filename]
-// Generated: 2025-06-27T23:32:07.989Z
+// Original route: /api/download/github-artifact/[jobId]
+// Generated: 2025-06-27T23:32:07.984Z
 
 // NextResponse/NextRequest converted to native Netlify response format
-const { readFile, stat } = require('fs/promises');
-const { join } = require('path');
+const { createGitHubActionsCompiler } = require('./lib/github-actions-compiler.js');
 
 // CORS headers for all responses
 const corsHeaders = {
@@ -55,82 +54,75 @@ async function GET(event, context) {
   }
 
   try {
-    const { filename } = params;
-    
-    // Validate filename to prevent directory traversal
-    if (!filename || filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+    const { jobId } = params;
+
+    console.log(`📦 Downloading GitHub Actions artifact for job: ${jobId}`);
+
+    // Validate jobId
+    if (!jobId || jobId.includes('..') || jobId.includes('/')) {
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({error: 'Invalid filename'})
+      body: JSON.stringify({error: 'Invalid job ID'})
     };
     }
-    
-    // Ensure the file has a valid plugin extension
-    const validExtensions = ['.so', '.dll', '.dylib'];
-    const hasValidExtension = validExtensions.some(ext => filename.endsWith(ext));
-    
-    if (!hasValidExtension) {
+
+    // Get GitHub Actions compiler
+    const githubCompiler = createGitHubActionsCompiler();
+    if (!githubCompiler) {
       return {
-      statusCode: 400,
+      statusCode: 503,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({error: 'Invalid file type. Only plugin files (.so, .dll, .dylib) are allowed.'})
+      body: JSON.stringify({error: 'GitHub Actions compiler not available'})
     };
     }
-    
-    // Construct the file path
-    const pluginsDir = join(process.cwd(), 'public', 'output', 'plugins');
-    const filePath = join(pluginsDir, filename);
-    
-    try {
-      // Check if file exists and get stats
-      const fileStats = await stat(filePath);
-      
-      if (!fileStats.isFile()) {
-        return {
-      statusCode: 404,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({error: 'File not found'})
-    };
-      }
-      
-      // Read the file
-      const fileBuffer = await readFile(filePath);
-      
-      // Determine content type based on extension
-      let contentType = 'application/octet-stream';
-      if (filename.endsWith('.so')) {
-        contentType = 'application/x-sharedlib';
-      } else if (filename.endsWith('.dll')) {
-        contentType = 'application/x-msdownload';
-      } else if (filename.endsWith('.dylib')) {
-        contentType = 'application/x-mach-binary';
-      }
-      
-      // Create response with appropriate headers
-      const response = new NextResponse(fileBuffer);
-      response.headers.set('Content-Type', contentType);
-      response.headers.set('Content-Disposition', `attachment; filename="${filename}"`);
-      response.headers.set('Content-Length', fileStats.size.toString());
-      response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-      
-      return response;
-      
-    } catch (fileError) {
-      console.error('File access error:', fileError);
+
+    // Get compilation status to get download URL
+    const status = await githubCompiler.getCompilationStatus(jobId);
+
+    if (status.status !== 'completed' || !status.rawDownloadUrl) {
       return {
       statusCode: 404,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({error: 'File not found'})
+      body: JSON.stringify({error: 'Compilation not completed or download URL not available'})
     };
     }
-    
+
+    console.log(`📥 Downloading artifact from: ${status.rawDownloadUrl}`);
+
+    // Download the artifact zip file directly from GitHub
+    const response = await fetch(status.rawDownloadUrl, {
+      headers: {
+        'Authorization': `token ${process.env.GITHUB_TOKEN}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'next-agentify'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to download artifact: ${response.statusText}`);
+    }
+
+    // Get the zip file as a buffer
+    const zipBuffer = Buffer.from(await response.arrayBuffer());
+
+    console.log(`📦 Serving zip file (${zipBuffer.length} bytes) for job: ${jobId}`);
+
+    // Return the entire zip file for download
+    const downloadResponse = new NextResponse(zipBuffer);
+    downloadResponse.headers.set('Content-Type', 'application/zip');
+    downloadResponse.headers.set('Content-Disposition', `attachment; filename="agent-plugin-${jobId}.zip"`);
+    downloadResponse.headers.set('Content-Length', zipBuffer.length.toString());
+    downloadResponse.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+    return downloadResponse;
+
   } catch (error) {
-    console.error('Plugin download error:', error);
+    console.error('GitHub artifact download error:', error);
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({error: 'Internal server error'})
+      body: JSON.stringify({error: `Failed to download artifact: ${error instanceof Error ? error.message : String(error)}`})
     };
   }
 }
@@ -150,7 +142,7 @@ exports.handler = async (event, context) => {
     const method = event.httpMethod;
     
     // Add route parameters to event if dynamic route
-    event.params = extractParams(event, 'download/plugin/[filename]');
+    event.params = extractParams(event, 'download/github-artifact/[jobId]');
     
     // Route to appropriate handler
     switch (method) {

@@ -12,6 +12,7 @@ interface CompilationJob {
   id: string;
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
   downloadUrl?: string;
+  rawDownloadUrl?: string;
   logs?: string;
   error?: string;
 }
@@ -117,12 +118,16 @@ export class GitHubActionsCompiler {
             run_id: targetRun.id
           });
 
-          const pluginArtifact = artifacts.data.artifacts.find(artifact => 
+          const pluginArtifact = artifacts.data.artifacts.find(artifact =>
             artifact.name.includes('plugin') || artifact.name.includes(jobId)
           );
 
           if (pluginArtifact) {
-            result.downloadUrl = pluginArtifact.archive_download_url;
+            // Store the raw GitHub artifact URL for internal processing
+            result.rawDownloadUrl = pluginArtifact.archive_download_url;
+
+            // Provide our endpoint that will download and serve the zip file
+            result.downloadUrl = `/api/download/github-artifact/${jobId}`;
           }
         } catch (artifactError) {
           console.error('Error fetching artifacts:', artifactError);

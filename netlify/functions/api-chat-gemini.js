@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/chat/gemini
-// Generated: 2025-06-27T22:41:56.886Z
+// Generated: 2025-06-27T23:32:07.948Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');

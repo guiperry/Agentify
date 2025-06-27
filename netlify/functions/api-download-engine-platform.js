@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/download/engine/[platform]
-// Generated: 2025-06-27T22:41:56.913Z
+// Generated: 2025-06-27T23:32:07.981Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { readFile, stat, readdir } = require('fs/promises');

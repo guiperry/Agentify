@@ -33,52 +33,114 @@ interface DeploymentPanelProps {
     // Other relevant config properties
   };
   onDeployComplete: () => void;
+  compiledPluginUrl?: string;
+  compilationJobId?: string;
 }
 
-const DeploymentPanel = ({ repoUrl, agentConfig, onDeployComplete }: DeploymentPanelProps) => {
+const DeploymentPanel = ({ repoUrl, agentConfig, onDeployComplete, compiledPluginUrl, compilationJobId }: DeploymentPanelProps) => {
   const [selectedPlatform, setSelectedPlatform] = useState("");
   const [isDeploying, setIsDeploying] = useState(false);
   const [deploymentStatus, setDeploymentStatus] = useState<
     "idle" | "building" | "deploying" | "success" | "failed"
   >("idle");
   const [deploymentProgress, setDeploymentProgress] = useState(0);
+  const [awsConfig, setAwsConfig] = useState({
+    region: "us-east-1",
+    instanceType: "t3.medium",
+    keyPairName: ""
+  });
 
   const deploymentPlatforms = [
-    { id: "vercel", name: "Vercel", icon: "⚡", description: "Fast, scalable deployment" },
-    { id: "netlify", name: "Netlify", icon: "🌐", description: "JAMstack deployment platform" },
-    { id: "aws", name: "AWS", icon: "☁️", description: "Amazon Web Services" },
-    { id: "gcp", name: "Google Cloud", icon: "🔥", description: "Google Cloud Platform" },
-    { id: "azure", name: "Azure", icon: "🔷", description: "Microsoft Azure" },
-    { id: "digitalocean", name: "DigitalOcean", icon: "🌊", description: "Simple cloud hosting" }
+    { id: "blockchain-aws", name: "Blockchain AWS", icon: "🔗", description: "Deploy to custom blockchain application on AWS", type: "blockchain" },
+    { id: "vercel", name: "Vercel", icon: "⚡", description: "Fast, scalable deployment", type: "cloud" },
+    { id: "netlify", name: "Netlify", icon: "🌐", description: "JAMstack deployment platform", type: "cloud" },
+    { id: "aws", name: "AWS", icon: "☁️", description: "Amazon Web Services", type: "cloud" },
+    { id: "gcp", name: "Google Cloud", icon: "🔥", description: "Google Cloud Platform", type: "cloud" },
+    { id: "azure", name: "Azure", icon: "🔷", description: "Microsoft Azure", type: "cloud" },
+    { id: "digitalocean", name: "DigitalOcean", icon: "🌊", description: "Simple cloud hosting", type: "cloud" }
   ];
 
-  const handleDeploy = () => {
+  const handleDeploy = async () => {
     if (!selectedPlatform) return;
-    
+
     setIsDeploying(true);
     setDeploymentStatus("building");
     setDeploymentProgress(0);
 
-    // Simulate deployment process
-    const steps = [
-      { status: "building" as const, progress: 25, message: "Building application..." },
-      { status: "deploying" as const, progress: 75, message: "Deploying to platform..." },
-      { status: "success" as const, progress: 100, message: "Deployment successful!" }
-    ];
+    try {
+      const deploymentId = `deploy-${Date.now()}`;
+      const isBlockchainDeployment = selectedPlatform === "blockchain-aws";
 
-    steps.forEach((step, index) => {
-      setTimeout(() => {
-        setDeploymentStatus(step.status);
-        setDeploymentProgress(step.progress);
-        if (index === steps.length - 1) {
-          setIsDeploying(false);
-          // Notify parent when deployment is complete
-          setTimeout(() => {
-            onDeployComplete();
-          }, 1000);
+      // Validate blockchain deployment requirements
+      if (isBlockchainDeployment) {
+        if (!compiledPluginUrl && !compilationJobId) {
+          throw new Error("No compiled plugin available. Please compile your agent first.");
         }
-      }, (index + 1) * 2000);
-    });
+        if (!awsConfig.keyPairName) {
+          throw new Error("AWS Key Pair name is required for blockchain deployment.");
+        }
+      }
+
+      // Call deployment API
+      const response = await fetch('/api/deploy', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          deploymentId,
+          agentName: agentConfig.name,
+          version: '1.0.0',
+          environment: 'production',
+          deploymentType: isBlockchainDeployment ? 'blockchain-aws' : 'cloud',
+          pluginUrl: compiledPluginUrl,
+          jobId: compilationJobId,
+          awsConfig: isBlockchainDeployment ? awsConfig : undefined
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Deployment failed');
+      }
+
+      // Simulate deployment process with different timings for blockchain vs cloud
+      const steps = isBlockchainDeployment ? [
+        { status: "building" as const, progress: 10, message: "Downloading plugin package..." },
+        { status: "building" as const, progress: 20, message: "Preparing AWS infrastructure..." },
+        { status: "deploying" as const, progress: 40, message: "Running Ansible playbook..." },
+        { status: "deploying" as const, progress: 60, message: "Deploying blockchain application..." },
+        { status: "deploying" as const, progress: 80, message: "Configuring agent plugin..." },
+        { status: "success" as const, progress: 100, message: "Blockchain deployment successful!" }
+      ] : [
+        { status: "building" as const, progress: 25, message: "Building application..." },
+        { status: "deploying" as const, progress: 75, message: "Deploying to platform..." },
+        { status: "success" as const, progress: 100, message: "Deployment successful!" }
+      ];
+
+      const stepDelay = isBlockchainDeployment ? 3000 : 2000; // Longer delays for blockchain
+
+      steps.forEach((step, index) => {
+        setTimeout(() => {
+          setDeploymentStatus(step.status);
+          setDeploymentProgress(step.progress);
+          if (index === steps.length - 1) {
+            setIsDeploying(false);
+            // Notify parent when deployment is complete
+            setTimeout(() => {
+              onDeployComplete();
+            }, 1000);
+          }
+        }, (index + 1) * stepDelay);
+      });
+
+    } catch (error) {
+      console.error('Deployment error:', error);
+      setDeploymentStatus("failed");
+      setIsDeploying(false);
+      // Show error message to user
+    }
   };
 
   const deploymentHistory = [
