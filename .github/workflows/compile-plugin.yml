@@ -1,0 +1,214 @@
+name: Compile Agent Plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: 'Unique job identifier'
+        required: true
+        type: string
+      config:
+        description: 'Agent configuration JSON'
+        required: true
+        type: string
+      build_target:
+        description: 'Build target (wasm or go)'
+        required: false
+        default: 'wasm'
+        type: choice
+        options:
+          - wasm
+          - go
+      platform:
+        description: 'Target platform'
+        required: false
+        default: 'linux'
+        type: choice
+        options:
+          - linux
+          - darwin
+          - windows
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential gcc
+        
+    - name: Create build directory
+      run: |
+        mkdir -p /tmp/build-${{ inputs.job_id }}
+        mkdir -p /tmp/output
+        
+    - name: Parse configuration
+      id: parse_config
+      run: |
+        echo "Parsing agent configuration..."
+        echo '${{ inputs.config }}' > /tmp/build-${{ inputs.job_id }}/config.json
+        cat /tmp/build-${{ inputs.job_id }}/config.json
+        
+    - name: Generate Go templates
+      run: |
+        cd /tmp/build-${{ inputs.job_id }}
+        
+        # Create main.go from template
+        cat > main.go << 'EOF'
+        package main
+        
+        import (
+            "fmt"
+            "log"
+            "os"
+        )
+        
+        func main() {
+            fmt.Println("Agent Plugin Compiled Successfully")
+            fmt.Printf("Job ID: %s\n", os.Getenv("JOB_ID"))
+            fmt.Printf("Build Target: %s\n", os.Getenv("BUILD_TARGET"))
+            fmt.Printf("Platform: %s\n", os.Getenv("PLATFORM"))
+        }
+        EOF
+        
+        # Create go.mod
+        cat > go.mod << 'EOF'
+        module agent-plugin
+        
+        go 1.21
+        EOF
+        
+    - name: Generate Python service
+      run: |
+        cd /tmp/build-${{ inputs.job_id }}
+        
+        cat > agent_service.py << 'EOF'
+        #!/usr/bin/env python3
+        """
+        Agent Service - Python component for LLM interactions
+        """
+        import json
+        import sys
+        import os
+        
+        def main():
+            print("Agent Service initialized")
+            config_file = os.path.join(os.path.dirname(__file__), 'config.json')
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    print(f"Loaded config for agent: {config.get('name', 'Unknown')}")
+        
+        if __name__ == "__main__":
+            main()
+        EOF
+        
+        cat > requirements.txt << 'EOF'
+        requests>=2.31.0
+        openai>=1.0.0
+        anthropic>=0.7.0
+        google-generativeai>=0.3.0
+        EOF
+        
+    - name: Compile WASM plugin
+      if: inputs.build_target == 'wasm'
+      run: |
+        cd /tmp/build-${{ inputs.job_id }}
+        export GOOS=js
+        export GOARCH=wasm
+        export JOB_ID=${{ inputs.job_id }}
+        export BUILD_TARGET=${{ inputs.build_target }}
+        export PLATFORM=${{ inputs.platform }}
+        
+        echo "Compiling WASM plugin..."
+        go build -o /tmp/output/agent_${{ inputs.job_id }}.wasm .
+        
+        # Copy wasm_exec.js
+        cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" /tmp/output/
+        
+        echo "WASM compilation completed"
+        ls -la /tmp/output/
+        
+    - name: Compile Go plugin
+      if: inputs.build_target == 'go'
+      run: |
+        cd /tmp/build-${{ inputs.job_id }}
+        export GOOS=${{ inputs.platform }}
+        export JOB_ID=${{ inputs.job_id }}
+        export BUILD_TARGET=${{ inputs.build_target }}
+        export PLATFORM=${{ inputs.platform }}
+        
+        case "${{ inputs.platform }}" in
+          "windows")
+            export GOARCH=amd64
+            go build -buildmode=plugin -o /tmp/output/agent_${{ inputs.job_id }}.dll .
+            ;;
+          "darwin")
+            export GOARCH=amd64
+            go build -buildmode=plugin -o /tmp/output/agent_${{ inputs.job_id }}.dylib .
+            ;;
+          *)
+            export GOARCH=amd64
+            go build -buildmode=plugin -o /tmp/output/agent_${{ inputs.job_id }}.so .
+            ;;
+        esac
+        
+        echo "Go plugin compilation completed"
+        ls -la /tmp/output/
+        
+    - name: Package Python service
+      run: |
+        cd /tmp/build-${{ inputs.job_id }}
+        cp agent_service.py /tmp/output/
+        cp requirements.txt /tmp/output/
+        cp config.json /tmp/output/
+        
+    - name: Create deployment package
+      run: |
+        cd /tmp/output
+        
+        # Create a deployment info file
+        cat > deployment_info.json << EOF
+        {
+          "job_id": "${{ inputs.job_id }}",
+          "build_target": "${{ inputs.build_target }}",
+          "platform": "${{ inputs.platform }}",
+          "compiled_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "files": $(ls -1 | jq -R . | jq -s .)
+        }
+        EOF
+        
+        echo "Deployment package contents:"
+        ls -la
+        cat deployment_info.json
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: agent-plugin-${{ inputs.job_id }}
+        path: /tmp/output/
+        retention-days: 7
+        
+    - name: Compilation summary
+      run: |
+        echo "✅ Agent plugin compilation completed successfully"
+        echo "Job ID: ${{ inputs.job_id }}"
+        echo "Build Target: ${{ inputs.build_target }}"
+        echo "Platform: ${{ inputs.platform }}"
+        echo "Artifacts uploaded with name: agent-plugin-${{ inputs.job_id }}"

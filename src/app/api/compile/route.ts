@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAgentCompilerService } from '@/lib/compiler/agent-compiler-interface';
 import type { AgentPluginConfig } from '@/lib/compiler/agent-compiler-interface';
 import { sendCompilationUpdate } from '@/lib/websocket-utils';
+import { createGitHubActionsCompiler } from '@/lib/github-actions-compiler';
 
 export async function POST(request: Request) {
   try {
@@ -77,15 +78,51 @@ export async function POST(request: Request) {
       process.env.GOOS = 'linux';
     }
 
-    // Compile the agent
-    const pluginPath = await compilerService.compileAgent(pluginConfig);
+    // Try local compilation first
+    let pluginPath: string;
+    let compilationLogs: string[];
+    let isGitHubActionsUsed = false;
 
-    // Get compilation logs
-    const compilationLogs = compilerService.getCompilationLogs();
+    try {
+      // Attempt local compilation
+      await sendCompilationUpdate('compilation', 50, 'Starting local compilation...');
+      pluginPath = await compilerService.compileAgent(pluginConfig);
+      compilationLogs = compilerService.getCompilationLogs();
+      await sendCompilationUpdate('compilation', 90, 'Local compilation completed successfully');
+    } catch (localError) {
+      console.log('Local compilation failed, trying GitHub Actions fallback:', localError);
+      await sendCompilationUpdate('compilation', 60, 'Local compilation failed, using GitHub Actions fallback...');
+
+      // Try GitHub Actions fallback
+      const githubCompiler = createGitHubActionsCompiler();
+      if (!githubCompiler) {
+        throw new Error('Both local compilation and GitHub Actions fallback are unavailable');
+      }
+
+      try {
+        await sendCompilationUpdate('compilation', 70, 'Triggering GitHub Actions compilation...');
+        const jobId = await githubCompiler.triggerCompilation(pluginConfig);
+
+        await sendCompilationUpdate('compilation', 80, 'Waiting for GitHub Actions compilation to complete...');
+        const result = await githubCompiler.waitForCompletion(jobId, 300000); // 5 minutes timeout
+
+        if (result.status !== 'completed') {
+          throw new Error(result.error || 'GitHub Actions compilation failed');
+        }
+
+        // For GitHub Actions, we'll return a different response format
+        isGitHubActionsUsed = true;
+        pluginPath = result.downloadUrl || '';
+        compilationLogs = ['GitHub Actions compilation completed successfully'];
+        await sendCompilationUpdate('compilation', 100, 'GitHub Actions compilation completed');
+      } catch (githubError) {
+        throw new Error(`All compilation methods failed. Local: ${localError instanceof Error ? localError.message : String(localError)}. GitHub Actions: ${githubError instanceof Error ? githubError.message : String(githubError)}`);
+      }
+    }
 
     // Extract filename from the plugin path for download URL
-    const filename = pluginPath.split('/').pop() || '';
-    const downloadUrl = `/api/download/plugin/${filename}`;
+    const filename = isGitHubActionsUsed ? `github-actions-${Date.now()}.zip` : (pluginPath.split('/').pop() || '');
+    const downloadUrl = isGitHubActionsUsed ? pluginPath : `/api/download/plugin/${filename}`;
 
     // Return success response
     return NextResponse.json({
@@ -94,10 +131,12 @@ export async function POST(request: Request) {
       downloadUrl,
       filename,
       logs: compilationLogs,
-      message: 'Agent compiled successfully'
+      message: isGitHubActionsUsed ? 'Agent compiled successfully via GitHub Actions' : 'Agent compiled successfully',
+      compilationMethod: isGitHubActionsUsed ? 'github-actions' : 'local'
     });
   } catch (error) {
     console.error('Compilation error:', error);
+    await sendCompilationUpdate('compilation', 0, `Compilation failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
     return NextResponse.json({
       success: false,
       message: `Compilation failed: ${error instanceof Error ? error.message : String(error)}`

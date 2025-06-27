@@ -19,12 +19,14 @@
     "check-toolchain": "node scripts/install-toolchain.js --check-only",
     "test-compilation": "node scripts/test-compilation.js",
     "test-go-compilation": "node scripts/test-go-compilation.js",
-    "test-imports": "node scripts/test-imports.js"
+    "test-imports": "node scripts/test-imports.js",
+    "test-github-actions": "node scripts/test-github-actions.js"
   },
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.1",
     "@google/generative-ai": "^0.2.0",
     "@hookform/resolvers": "^3.9.0",
+    "@octokit/rest": "^21.1.1",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-alert-dialog": "^1.1.1",
     "@radix-ui/react-aspect-ratio": "^1.1.0",

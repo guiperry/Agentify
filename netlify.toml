@@ -57,6 +57,12 @@
   # SUPABASE_SERVICE_ROLE_KEY = "your-service-role-key"
   # API_KEY_ENCRYPTION_KEY = "your-32-char-encryption-key"
 
+  # GitHub Actions Configuration (set these in Netlify UI for security)
+  # GITHUB_TOKEN = "your-github-token"
+  # GITHUB_OWNER = "guiperry"
+  # GITHUB_REPO = "next-agentify"
+  # GITHUB_WORKFLOW_ID = "compile-plugin.yml"
+
 # Build processing settings
 [build.processing]
   skip_processing = false
