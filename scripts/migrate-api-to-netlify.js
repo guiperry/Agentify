@@ -141,14 +141,14 @@ function extractImports(content) {
 
 // Convert Next.js path aliases to relative paths for Netlify functions
 function convertModulePath(modulePath) {
-  // Convert @/lib/... to relative paths from netlify/functions/
+  // Convert @/lib/... to relative paths from netlify/functions/ to src/lib/
   if (modulePath.startsWith('@/lib/')) {
-    return '../../lib/' + modulePath.substring(6);
+    return '../../src/lib/' + modulePath.substring(6);
   }
 
-  // Convert @/... to relative paths from netlify/functions/
+  // Convert @/... to relative paths from netlify/functions/ to src/
   if (modulePath.startsWith('@/')) {
-    return '../../' + modulePath.substring(2);
+    return '../../src/' + modulePath.substring(2);
   }
 
   // Keep other module paths as-is (npm packages, etc.)
