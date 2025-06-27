@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/deploy
-// Generated: 2025-06-27T20:51:18.024Z
+// Generated: 2025-06-27T21:18:06.227Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 
@@ -29,7 +29,7 @@ async function POST(event, context) {
   
 
   try {
-    const body= requestBody;
+    const body: DeploymentRequest = requestBody;
     const { deploymentId, agentName, version, environment } = body;
 
     // Validate required fields
@@ -58,7 +58,7 @@ async function POST(event, context) {
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: true,
       deploymentId,
       message: `Deployment of ${agentName} v${version} to ${environment} started`,
       status: 'initiated'})

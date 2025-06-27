@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/agent/validate
-// Generated: 2025-06-27T20:51:17.999Z
+// Generated: 2025-06-27T21:18:06.192Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 
@@ -40,7 +40,7 @@ async function POST(event, context) {
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({isValid,
+      body: JSON.stringify({isValid: false,
         errors: { general: 'Agent facts are required' },
         warnings: {}})
     };
@@ -55,7 +55,7 @@ async function POST(event, context) {
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({isValid,
+      body: JSON.stringify({isValid: false,
       errors: { general: 'Failed to validate agent facts' },
       warnings: {}})
     };

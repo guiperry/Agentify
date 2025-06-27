@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/compile
-// Generated: 2025-06-27T20:51:18.011Z
+// Generated: 2025-06-27T21:18:06.209Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createAgentCompilerService } = require('./lib/agent-compiler-interface.js');
@@ -39,7 +39,7 @@ async function POST(event, context) {
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
         message: 'Missing agent configuration'})
     };
     }
@@ -74,7 +74,7 @@ async function POST(event, context) {
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
         message: `Configuration conversion failed: ${conversionError instanceof Error ? conversionError.message : String(conversionError)}`})
     };
     }
@@ -148,7 +148,7 @@ async function POST(event, context) {
           return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: true,
             message: 'Compilation started via GitHub Actions. Check the GitHub Actions tab in your repository for progress and download the artifact when complete.',
             compilationMethod: 'github-actions',
             status: 'in_progress',
@@ -170,7 +170,7 @@ async function POST(event, context) {
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: true,
       pluginPath,
       downloadUrl,
       filename,
@@ -184,7 +184,7 @@ async function POST(event, context) {
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
       message: `Compilation failed: ${error instanceof Error ? error.message : String(error)}`})
     };
   }

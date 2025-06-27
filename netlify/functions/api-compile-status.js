@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/compile/status
-// Generated: 2025-06-27T20:51:18.022Z
+// Generated: 2025-06-27T21:18:06.223Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createGitHubActionsCompiler } = require('./lib/github-actions-compiler.js');
@@ -37,7 +37,7 @@ async function GET(event, context) {
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
         message: 'Missing jobId parameter'})
     };
     }
@@ -47,7 +47,7 @@ async function GET(event, context) {
       return {
       statusCode: 503,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
         message: 'GitHub Actions compiler not available'})
     };
     }
@@ -57,7 +57,7 @@ async function GET(event, context) {
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: true,
       status: status.status,
       downloadUrl: status.downloadUrl,
       error: status.error,
@@ -68,7 +68,7 @@ async function GET(event, context) {
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
       message: `Status check failed: ${error instanceof Error ? error.message : String(error)}`})
     };
   }
@@ -98,7 +98,7 @@ async function POST(event, context) {
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
         message: 'Missing jobId'})
     };
     }
@@ -108,7 +108,7 @@ async function POST(event, context) {
       return {
       statusCode: 503,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
         message: 'GitHub Actions compiler not available'})
     };
     }
@@ -131,7 +131,7 @@ async function POST(event, context) {
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
       message: `Compilation wait failed: ${error instanceof Error ? error.message : String(error)}`})
     };
   }

@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/deploy/[id]/rollback
-// Generated: 2025-06-27T20:51:18.023Z
+// Generated: 2025-06-27T21:18:06.225Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 
@@ -77,7 +77,7 @@ async function POST(event, context) {
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: true,
       deploymentId,
       message: `Rollback initiated for deployment ${deploymentId}`,
       status: 'rollback_initiated'})

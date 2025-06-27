@@ -86,13 +86,7 @@ jobs:
         }
         EOF
 
-        # Verify the generated main.go
-        echo "Generated main.go:"
-        cat main.go
-        echo "Checking for unused imports..."
-        go vet .
-
-        # Create go.mod
+        # Create go.mod first
         cat > go.mod << 'EOF'
         module agent-plugin
 
@@ -101,6 +95,12 @@ jobs:
 
         # Initialize go module
         go mod tidy
+
+        # Verify the generated main.go
+        echo "Generated main.go:"
+        cat main.go
+        echo "Checking for unused imports..."
+        go vet .
         
     - name: Generate Python service
       run: |

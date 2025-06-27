@@ -309,39 +309,51 @@ function convertNextJsToNetlify(method, functionBody, params = '') {
 function convertNextJsPatterns(code) {
   let convertedCode = code;
 
-  // Handle return NextResponse.json() patterns
+  // Handle return NextResponse.json() patterns with better multi-line support
   convertedCode = convertedCode.replace(
-    /return\s+NextResponse\.json\s*\(\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*(?:,\s*\{\s*status:\s*(\d+)\s*\})?\s*\)/g,
-    (_, data, status) => {
+    /return\s+NextResponse\.json\s*\(\s*(\{[\s\S]*?\})\s*(?:,\s*\{\s*status:\s*(\d+)\s*\})?\s*\)/g,
+    (match, data, status) => {
       const statusCode = status || '200';
+      // Keep the data object as-is, just remove the outer braces for JSON.stringify
+      const cleanData = data.slice(1, -1).trim(); // Remove first { and last }
       return `return {
       statusCode: ${statusCode},
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({${data.trim()}})
+      body: JSON.stringify({${cleanData}})
     }`;
     }
   );
 
   // Handle NextResponse.json() without return (shouldn't happen but just in case)
   convertedCode = convertedCode.replace(
-    /NextResponse\.json\s*\(\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*(?:,\s*\{\s*status:\s*(\d+)\s*\})?\s*\)/g,
-    (_, data, status) => {
+    /NextResponse\.json\s*\(\s*(\{[\s\S]*?\})\s*(?:,\s*\{\s*status:\s*(\d+)\s*\})?\s*\)/g,
+    (match, data, status) => {
       const statusCode = status || '200';
+      // Keep the data object as-is, just remove the outer braces for JSON.stringify
+      const cleanData = data.slice(1, -1).trim(); // Remove first { and last }
       return `return {
       statusCode: ${statusCode},
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({${data.trim()}})
+      body: JSON.stringify({${cleanData}})
     }`;
     }
   );
 
   return convertedCode
-    // TypeScript syntax removal - comprehensive patterns
-    .replace(/:\s*[a-zA-Z_$][a-zA-Z0-9_$<>[\]|&\s]*(?=\s*[;=,)])/g, '') // Type annotations (variables, parameters)
+    // TypeScript syntax removal - comprehensive patterns (but preserve object property values)
     .replace(/:\s*string(?=\s*[;=,)])/g, '') // String type annotations
     .replace(/:\s*number(?=\s*[;=,)])/g, '') // Number type annotations
     .replace(/:\s*boolean(?=\s*[;=,)])/g, '') // Boolean type annotations
     .replace(/:\s*any(?=\s*[;=,)])/g, '') // Any type annotations
+    // More specific type annotation pattern that avoids object property values
+    .replace(/\)\s*:\s*[a-zA-Z_$][a-zA-Z0-9_$<>[\]|&\s]*(?=\s*[{;])/g, ')') // Function return types
+    .replace(/\w+\s*:\s*[a-zA-Z_$][a-zA-Z0-9_$<>[\]|&\s]*(?=\s*[;,)])/g, (match) => {
+      // Only remove if it looks like a type annotation, not an object property
+      if (match.includes('false') || match.includes('true') || match.includes('null') || /:\s*['"]/.test(match) || /:\s*\d/.test(match)) {
+        return match; // Keep object property values
+      }
+      return match.replace(/:\s*[a-zA-Z_$][a-zA-Z0-9_$<>[\]|&\s]*/, ''); // Remove type annotation
+    })
     .replace(/\s+as\s+[a-zA-Z_$][a-zA-Z0-9_$<>[\]|&'\s]*(?=\s*[;,)])/g, '') // Type assertions
     .replace(/\s+as\s+'[^']*'(?:\s*\|\s*'[^']*')*(?=\s*[;,)])/g, '') // String literal type assertions
     .replace(/interface\s+\w+\s*\{[^}]*\}/g, '') // Interface declarations

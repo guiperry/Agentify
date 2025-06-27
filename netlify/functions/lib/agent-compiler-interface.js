@@ -10,6 +10,21 @@ class AgentCompilerService {
   }
 
   /**
+   * Convert UI config to plugin config format
+   */
+  convertUIConfigToPluginConfig(uiConfig) {
+    return {
+      name: uiConfig.name || 'agent-plugin',
+      personality: uiConfig.personality || 'helpful',
+      instructions: uiConfig.instructions || 'You are a helpful AI assistant.',
+      features: uiConfig.features || [],
+      settings: uiConfig.settings || {},
+      buildTarget: 'wasm', // Default to WASM for serverless
+      platform: 'linux'
+    };
+  }
+
+  /**
    * Always fails in Netlify environment - forces GitHub Actions fallback
    */
   async compileAgent(config) {

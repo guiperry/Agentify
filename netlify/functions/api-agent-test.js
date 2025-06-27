@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/agent/test
-// Generated: 2025-06-27T20:51:17.997Z
+// Generated: 2025-06-27T21:18:06.188Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 
@@ -33,8 +33,10 @@ async function POST(event, context) {
     const { config, repoUrl } = body;
 
     if (!config) {
-      return NextResponse.json({
-        success,
+      return {
+      statusCode: 400,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({success: false,
         testResults: {
           passed: 0,
           failed: 1,
@@ -47,8 +49,8 @@ async function POST(event, context) {
             error: 'Missing agent configuration'
           }]
         },
-        logs: ['Error: Missing agent configuration']
-      }, { status: 400 });
+        logs: ['Error: Missing agent configuration']})
+    };
     }
 
     // Simulate testing the agent configuration
@@ -57,8 +59,10 @@ async function POST(event, context) {
     return NextResponse.json(testResults);
   } catch (error) {
     console.error('Agent testing error:', error);
-    return NextResponse.json({
-      success,
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({success: false,
       testResults: {
         passed: 0,
         failed: 1,
@@ -71,8 +75,8 @@ async function POST(event, context) {
           error: error instanceof Error ? error.message : 'Testing failed'
         }]
       },
-      logs: [`Error: ${error instanceof Error ? error.message : 'Testing failed'}`]
-    }, { status: 500 });
+      logs: [`Error: ${error instanceof Error ? error.message : 'Testing failed'}`]})
+    };
   }
 }
 

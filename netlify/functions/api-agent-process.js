@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/agent/process
-// Generated: 2025-06-27T20:51:17.994Z
+// Generated: 2025-06-27T21:18:06.185Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 
@@ -39,7 +39,7 @@ async function POST(event, context) {
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
         steps: [],
         errors: ['Missing agent configuration']})
     };
@@ -56,7 +56,7 @@ async function POST(event, context) {
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success,
+      body: JSON.stringify({success: false,
       steps: [],
       errors: [error instanceof Error ? error.message : 'Processing failed']})
     };
