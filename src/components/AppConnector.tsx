@@ -9,6 +9,7 @@ import { Link, Zap, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { analyzeApplication, AppConnectionResult } from "@/services";
 import { useOnboarding } from "@/contexts/OnboardingContext";
+import MiniLoadingScreen from "./MiniLoadingScreen";
 
 interface AppConnectorProps {
   onAppConnect: (appData: {url: string, name: string, type: string}) => void;
@@ -141,12 +142,13 @@ const AppConnector = ({ onAppConnect }: AppConnectorProps) => {
             </div>
               
             {isAnalyzing && (
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
-                <div className="flex items-center space-x-3">
-                  <div className="animate-pulse h-3 w-3 bg-blue-400 rounded-full"></div>
-                  <span className="text-blue-400">Analyzing repository structure and capabilities...</span>
-                </div>
-              </div>
+              <MiniLoadingScreen
+                message="Analyzing repository structure and capabilities..."
+                overlay={false}
+                icon="logo"
+                size="medium"
+                animated={true}
+              />
             )}
 
             {analysisError && (

@@ -13,4 +13,10 @@ func {{.toolName}}(params map[string]interface{}) (interface{}, error) {
 	{{.toolImplementation}}
 }
 
-// Tool registration is handled by the main plugin initialization
+{{if ne .buildTarget "wasm"}}
+// Register the tool (not needed for WASM builds)
+func init() {
+	// Tool registration is handled differently in WASM builds
+	// RegisterTool("{{.toolName}}", {{.toolName}})
+}
+{{end}}

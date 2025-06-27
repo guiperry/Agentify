@@ -8,28 +8,14 @@ var pythonAgentServiceScript = `{{.pythonAgentServiceScript}}`
 // Embedded Python requirements
 var pythonRequirements = `{{.pythonRequirements}}`
 
-// Embedded resources
-var embeddedResources = map[string][]byte{
-{{.embeddedResources}}
-}
-
-// Embedded prompts
-var embeddedPrompts = map[string]string{
-{{.embeddedPrompts}}
-}
-
 // GetResource returns a resource by name
 func GetResource(name string) ([]byte, error) {
-	if resource, exists := embeddedResources[name]; exists {
-		return resource, nil
-	}
+	// Resources would be embedded here based on agent configuration
 	return nil, fmt.Errorf("resource not found: %s", name)
 }
 
 // GetPrompt returns a prompt by name
 func GetPrompt(name string) (string, error) {
-	if prompt, exists := embeddedPrompts[name]; exists {
-		return prompt, nil
-	}
+	// Prompts would be embedded here based on agent configuration
 	return "", fmt.Errorf("prompt not found: %s", name)
 }

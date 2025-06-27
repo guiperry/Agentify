@@ -533,27 +533,6 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Compile Button moved here */}
-              <div className="pt-2">
-                <Button
-                  onClick={handleCompile}
-                  disabled={isCompiling}
-                  className="w-full bg-purple-600 hover:bg-purple-700 text-white"
-                >
-                  {isCompiling ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Compiling...
-                    </>
-                  ) : (
-                    <>
-                      <Code className="mr-2 h-4 w-4" />
-                      Compile Agent
-                    </>
-                  )}
-                </Button>
-              </div>
-
               <div className="bg-slate-900 border border-slate-700 rounded-md p-4 h-[400px] overflow-y-auto font-mono text-sm text-slate-300">
                 {compileLog.length > 0 ? (
                   compileLog.map((log, index) => (

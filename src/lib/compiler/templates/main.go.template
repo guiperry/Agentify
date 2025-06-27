@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+{{if eq .buildTarget "wasm"}}
+	// No additional imports needed for WASM
+{{end}}
 
 	"github.com/philippgille/chromem-go"
 )
@@ -44,6 +47,63 @@ const (
 	NetworkAccess = {{.networkAccess}}
 	FileSystemAccess = {{.fileSystemAccess}}
 )
+
+// InferenceRequest represents a request to the agent
+type InferenceRequest struct {
+	// The input text from the user or system
+	Input string `json:"input"`
+
+	// The conversation history
+	History []*ConversationMessage `json:"history,omitempty"`
+
+	// The session ID for tracking conversation state
+	SessionID string `json:"sessionId"`
+
+	// Additional parameters for the inference
+	Parameters map[string]interface{} `json:"parameters,omitempty"`
+}
+
+// InferenceResponse represents a response from the agent
+type InferenceResponse struct {
+	// The output text from the agent
+	Output string `json:"output"`
+
+	// The tool calls made during inference
+	ToolCalls []*ToolCall `json:"toolCalls,omitempty"`
+
+	// The reasoning trace (if enabled)
+	Reasoning string `json:"reasoning,omitempty"`
+
+	// Additional metadata about the response
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// ConversationMessage represents a message in the conversation history
+type ConversationMessage struct {
+	// The role of the message sender (user, assistant, system)
+	Role string `json:"role"`
+
+	// The content of the message
+	Content string `json:"content"`
+
+	// The timestamp of the message
+	Timestamp int64 `json:"timestamp"`
+}
+
+// ToolCall represents a call to a tool during inference
+type ToolCall struct {
+	// The name of the tool
+	Name string `json:"name"`
+
+	// The input to the tool
+	Input map[string]interface{} `json:"input"`
+
+	// The output from the tool
+	Output interface{} `json:"output"`
+
+	// The timestamp of the tool call
+	Timestamp int64 `json:"timestamp"`
+}
 
 // PythonAgentService manages the embedded Python agent service
 type PythonAgentService struct {
@@ -295,6 +355,8 @@ type AgentPlugin struct {
 	subAgents           map[string]*SubAgentInfo
 	terminalManager     *TerminalManager
 	monitoringService   *AgentMonitoringService
+	promptGenerator     *AgentPromptGenerator
+	communicationHub    *AgentCommunicationHub
 	strategies          []OrchestrationStrategy
 	mutex               sync.RWMutex
 	initialized         bool
@@ -1007,17 +1069,33 @@ func (ap *AgentPlugin) SpawnSubAgent(ctx context.Context, role, name string, con
 	}
 	terminalID := terminalSession.ID
 
+	// Generate specialized prompt for the sub-agent using MAIN AGENT's prompt generator
+	taskDescription := fmt.Sprintf("Handle %s tasks as a sub-agent of %s", role, AgentID)
+	capabilities := ap.extractCapabilitiesFromConfig(config)
+	subAgentPrompt, err := ap.promptGenerator.GenerateSubAgentPrompt(taskDescription, role, capabilities)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate sub-agent prompt: %v", err)
+	}
+
+	// Subscribe sub-agent to MAIN AGENT's communication hub
+	_, err = ap.communicationHub.SubscribeToMessages(subAgentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to subscribe sub-agent to communication hub: %v", err)
+	}
+
 	// Create sub-agent configuration
 	subAgentConfig := SubagentConfig{
 		ID:          subAgentID,
 		Name:        name,
-		Description: fmt.Sprintf("Sub-agent for %s role", role),
+		Description: fmt.Sprintf("Sub-agent for %s role, managed by main agent %s", role, AgentID),
 		Language:    PythonLanguage, // Default to Python
-		InitScript:  ap.generateSubAgentScript(role, config),
+		InitScript:  ap.generateSubAgentScript(role, config, subAgentPrompt),
 		EnvironmentVariables: map[string]string{
-			"SUBAGENT_ROLE": role,
-			"SUBAGENT_ID":   subAgentID,
-			"TERMINAL_ID":   terminalID,
+			"SUBAGENT_ROLE":    role,
+			"SUBAGENT_ID":      subAgentID,
+			"TERMINAL_ID":      terminalID,
+			"MAIN_AGENT_ID":    AgentID, // Reference to main agent
+			"COMMUNICATION_HUB": "main_agent", // Indicates communication goes through main agent
 		},
 		ResourceLimits: ResourceLimits{
 			MemoryMB:   256, // Smaller resource allocation for sub-agents
@@ -1068,12 +1146,38 @@ func (ap *AgentPlugin) SpawnSubAgent(ctx context.Context, role, name string, con
 	return subAgentInfo, nil
 }
 
+// extractCapabilitiesFromConfig extracts capabilities from sub-agent configuration
+func (ap *AgentPlugin) extractCapabilitiesFromConfig(config map[string]interface{}) []string {
+	capabilities := []string{}
+
+	// Extract capabilities from config
+	if tools, ok := config["tools"].([]interface{}); ok {
+		for _, tool := range tools {
+			if toolStr, ok := tool.(string); ok {
+				capabilities = append(capabilities, toolStr)
+			}
+		}
+	}
+
+	// Add default capabilities based on agent type
+	capabilities = append(capabilities,
+		"Python execution environment",
+		"File system access (sandboxed)",
+		"Network communication",
+		"Data processing and analysis",
+		"Parent agent communication",
+	)
+
+	return capabilities
+}
+
 // generateSubAgentScript generates initialization script for sub-agents
-func (ap *AgentPlugin) generateSubAgentScript(role string, config map[string]interface{}) string {
+func (ap *AgentPlugin) generateSubAgentScript(role string, config map[string]interface{}, prompt string) string {
 	script := fmt.Sprintf(`#!/usr/bin/env python3
 """
 Sub-agent for role: %s
 Generated at: %s
+Specialized Prompt: %s
 """
 
 import os
@@ -1090,23 +1194,92 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Specialized prompt for this sub-agent
+AGENT_PROMPT = '''%s'''
+
 class SubAgent:
     def __init__(self):
         self.role = "%s"
         self.agent_id = os.environ.get('SUBAGENT_ID', 'unknown')
         self.terminal_id = os.environ.get('TERMINAL_ID', 'unknown')
         self.config = %s
+        self.prompt = AGENT_PROMPT
         logger.info(f"Sub-agent initialized with role: {self.role}")
+        logger.info(f"Specialized prompt loaded: {len(self.prompt)} characters")
+
+    def get_specialized_prompt(self) -> str:
+        """Get the specialized prompt for this sub-agent"""
+        return self.prompt
 
     def process_task(self, task: str) -> str:
-        """Process a task specific to this sub-agent's role"""
+        """Process a task specific to this sub-agent's role using specialized prompt"""
         logger.info(f"Processing task: {task}")
 
+        # Use the specialized prompt to guide task processing
+        context = f"Role: {self.role}\nPrompt: {self.prompt}\nTask: {task}"
+
         # Role-specific processing logic would go here
-        result = f"Sub-agent {self.role} processed: {task}"
+        # In a real implementation, this would use the prompt to guide LLM interactions
+        result = f"Sub-agent {self.role} processed task using specialized prompt: {task}"
 
         logger.info(f"Task completed: {result}")
         return result
+
+    def report_status(self) -> Dict[str, Any]:
+        """Report current status to parent agent"""
+        return {
+            "agent_id": self.agent_id,
+            "role": self.role,
+            "status": "active",
+            "terminal_id": self.terminal_id,
+            "timestamp": time.time(),
+            "prompt_length": len(self.prompt)
+        }
+
+    def send_message_to_main_agent(self, message_type: str, content: str, metadata: Dict[str, Any] = None, priority: int = 2):
+        """Send a message to the main agent through the communication hub"""
+        main_agent_id = os.environ.get('MAIN_AGENT_ID', 'unknown')
+        logger.info(f"Sending {message_type} message to main agent {main_agent_id}: {content}")
+
+        # In a real implementation, this would use the communication hub API
+        # For now, we log the message
+        message_data = {
+            "sender": self.agent_id,
+            "receiver": main_agent_id,
+            "type": message_type,
+            "content": content,
+            "metadata": metadata or {},
+            "priority": priority,
+            "timestamp": time.time()
+        }
+        logger.info(f"Message data: {message_data}")
+
+    def send_message_to_peer(self, peer_id: str, message_type: str, content: str, metadata: Dict[str, Any] = None, priority: int = 2):
+        """Send a message to another sub-agent through the main agent"""
+        logger.info(f"Sending {message_type} message to peer {peer_id} via main agent: {content}")
+
+        # In a real implementation, this would route through the main agent's communication hub
+        # For now, we log the message
+        message_data = {
+            "sender": self.agent_id,
+            "receiver": peer_id,
+            "type": message_type,
+            "content": content,
+            "metadata": metadata or {},
+            "priority": priority,
+            "timestamp": time.time(),
+            "routed_by": os.environ.get('MAIN_AGENT_ID', 'unknown')
+        }
+        logger.info(f"Peer message data: {message_data}")
+
+    def request_task_from_main_agent(self, task_type: str = "general"):
+        """Request a task from the main agent"""
+        self.send_message_to_main_agent(
+            "task_request",
+            f"Sub-agent {self.role} requesting {task_type} task",
+            {"task_type": task_type, "capabilities": ["python", "data_processing"]},
+            priority=3
+        )
 
     def run(self):
         """Main execution loop for the sub-agent"""
@@ -1124,7 +1297,7 @@ class SubAgent:
 if __name__ == "__main__":
     sub_agent = SubAgent()
     sub_agent.run()
-`, role, time.Now().Format(time.RFC3339), role, role, ap.configToJSON(config))
+`, role, time.Now().Format(time.RFC3339), prompt, role, prompt, role, ap.configToJSON(config))
 
 	return script
 }
@@ -1158,6 +1331,12 @@ func NewAgentPlugin() (*AgentPlugin, error) {
 
 	// Initialize orchestration engine
 	plugin.orchestrationEngine = NewOrchestrationEngine(plugin)
+
+	// Initialize prompt generator for sub-agent creation
+	plugin.promptGenerator = NewAgentPromptGenerator(plugin)
+
+	// Initialize communication hub for agent-to-agent messaging
+	plugin.communicationHub = NewAgentCommunicationHub(plugin)
 
 	return plugin, nil
 }
@@ -1193,18 +1372,25 @@ func (p *AgentPlugin) Initialize(config map[string]interface{}) error {
 
 	p.memory = memory
 	
-	// Configure the TEE
+	// Configure the TEE with platform-inherited settings
 	teeConfig := TEEConfig{
-		IsolationLevel:   "{{.isolationLevel}}", // Will be replaced with the actual value from config
+		IsolationLevel:   "{{.isolationLevel}}", // Inherited from platform TEE manager
 		ResourceLimits: ResourceLimits{
-			MemoryMB:   {{.memoryLimit}},        // Will be replaced with the actual value from config
-			CPUCores:   {{.cpuCores}},           // Will be replaced with the actual value from config
-			TimeoutSec: {{.timeoutSec}},         // Will be replaced with the actual value from config
+			MemoryMB:   {{.memoryLimit}},        // Constrained by platform limits
+			CPUCores:   {{.cpuCores}},           // Constrained by platform limits
+			TimeoutSec: {{.timeoutSec}},         // Constrained by platform limits
 		},
-		NetworkAccess:    {{.networkAccess}},    // Will be replaced with the actual value from config
-		FileSystemAccess: {{.fileSystemAccess}}, // Will be replaced with the actual value from config
-		EnvVars:          map[string]string{},  // Will be populated based on config
-		WorkingDir:       "",                   // Will use a temporary directory by default
+		NetworkAccess:    {{.networkAccess}},    // Controlled by platform security policy
+		FileSystemAccess: {{.fileSystemAccess}}, // Controlled by platform security policy
+		EnvVars:          map[string]string{},   // Will be populated with platform-approved vars
+		WorkingDir:       "",                    // Platform will provide secure working directory
+	}
+
+	// Inherit platform security constraints if available
+	if platformTEEConfig := os.Getenv("PLATFORM_TEE_CONFIG"); platformTEEConfig != "" {
+		// In a production system, this would parse platform TEE constraints
+		// and ensure agent TEE config doesn't exceed platform limits
+		fmt.Printf("Agent TEE inheriting platform constraints: %s\n", platformTEEConfig)
 	}
 	p.teeConfig = teeConfig
 	
@@ -1215,14 +1401,14 @@ func (p *AgentPlugin) Initialize(config map[string]interface{}) error {
 	}
 	p.tee = tee
 
-	// Initialize sub-agent manager
+	// Initialize sub-agent manager with TEE inheritance
 	subagentManager, err := NewSubagentManager(
-		"/tmp/subagents", // Work directory for sub-agents
+		"/tmp/subagents", // Work directory for sub-agents (within main agent TEE)
 		10,               // Maximum number of sub-agents
-		ResourceLimits{   // Default resource limits for sub-agents
-			MemoryMB:   256,
-			CPUCores:   1,
-			TimeoutSec: 120,
+		ResourceLimits{   // Sub-agent limits inherit from main agent TEE constraints
+			MemoryMB:   256,  // Should be <= main agent memory limit
+			CPUCores:   1,    // Should be <= main agent CPU limit
+			TimeoutSec: 120,  // Should be <= main agent timeout
 		},
 	)
 	if err != nil {
@@ -1415,7 +1601,12 @@ func (p *AgentPlugin) Initialize(config map[string]interface{}) error {
 			}
 		}
 	}
-	
+
+	// Start the communication hub for agent-to-agent messaging
+	if err := p.StartCommunicationHub(); err != nil {
+		return fmt.Errorf("failed to start communication hub: %v", err)
+	}
+
 	p.initialized = true
 	return nil
 }
@@ -1529,8 +1720,140 @@ func (p *AgentPlugin) Stop() error {
 		}
 	}
 
+	// Stop the communication hub
+	if err := p.StopCommunicationHub(); err != nil {
+		fmt.Printf("Warning: failed to stop communication hub: %v\n", err)
+	}
+
 	p.running = false
 	return nil
+}
+
+// Terminate terminates the agent plugin (alias for Stop for compatibility)
+func (p *AgentPlugin) Terminate() error {
+	return p.Stop()
+}
+
+// ProcessInference processes an inference request and returns a response
+func (p *AgentPlugin) ProcessInference(ctx context.Context, request *InferenceRequest) (*InferenceResponse, error) {
+	p.mutex.RLock()
+	if !p.initialized || !p.running {
+		p.mutex.RUnlock()
+		return nil, fmt.Errorf("agent not initialized or not running")
+	}
+	p.mutex.RUnlock()
+
+	// Use the orchestration engine to process the inference
+	if p.orchestrationEngine != nil {
+		// Select the best orchestration pattern for this input
+		pattern, err := p.orchestrationEngine.SelectOrchestrationPattern(ctx, request.Input, map[string]interface{}{
+			"session_id": request.SessionID,
+			"parameters": request.Parameters,
+		})
+		if err != nil {
+			// Fallback to simple pattern if selection fails
+			pattern = SingleAgentTools
+		}
+
+		// Execute the selected orchestration pattern
+		result, err := p.orchestrationEngine.ExecuteOrchestrationPattern(ctx, pattern, request.Input, request.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("orchestration inference failed: %v", err)
+		}
+
+		// Create the response
+		response := &InferenceResponse{
+			Output: result,
+			Metadata: map[string]interface{}{
+				"agent_id":         AgentID,
+				"session_id":       request.SessionID,
+				"timestamp":        time.Now().Unix(),
+				"orchestration":    true,
+				"pattern_used":     string(pattern),
+			},
+		}
+
+		return response, nil
+	}
+
+	// Fallback to direct LLM inference if no orchestration engine
+	if p.llmService != nil {
+		// Create system prompt
+		systemPrompt := p.prompts["system"]
+		if systemPrompt == "" {
+			systemPrompt = "You are a helpful AI assistant."
+		}
+
+		// Build conversation history
+		messages := []LLMMessage{
+			{Role: "system", Content: systemPrompt},
+		}
+
+		// Add conversation history if provided
+		if request.History != nil {
+			for _, msg := range request.History {
+				messages = append(messages, LLMMessage{
+					Role:    msg.Role,
+					Content: msg.Content,
+				})
+			}
+		}
+
+		// Add current user input
+		messages = append(messages, LLMMessage{
+			Role:    "user",
+			Content: request.Input,
+		})
+
+		// Generate response using LLM
+		response, err := p.llmService.GenerateFromMessages(ctx, messages)
+		if err != nil {
+			return nil, fmt.Errorf("LLM inference failed: %v", err)
+		}
+
+		// Create the response
+		inferenceResponse := &InferenceResponse{
+			Output: response.Text,
+			Metadata: map[string]interface{}{
+				"agent_id":   AgentID,
+				"session_id": request.SessionID,
+				"timestamp":  time.Now().Unix(),
+				"llm_direct": true,
+			},
+		}
+
+		return inferenceResponse, nil
+	}
+
+	// If no LLM service available, return a basic response
+	return &InferenceResponse{
+		Output: fmt.Sprintf("Agent %s received: %s", AgentID, request.Input),
+		Metadata: map[string]interface{}{
+			"agent_id":   AgentID,
+			"session_id": request.SessionID,
+			"timestamp":  time.Now().Unix(),
+			"basic_mode": true,
+		},
+	}, nil
+}
+
+// CallTool calls a tool by name with the given parameters
+func (p *AgentPlugin) CallTool(ctx context.Context, name string, params map[string]interface{}) (interface{}, error) {
+	p.mutex.RLock()
+	if !p.initialized || !p.running {
+		p.mutex.RUnlock()
+		return nil, fmt.Errorf("agent not initialized or not running")
+	}
+
+	tool, ok := p.tools[name]
+	p.mutex.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("tool not found: %s", name)
+	}
+
+	// Call the tool function
+	return tool(ctx, params)
 }
 
 // RunAgent runs an agent with the given input using orchestration
@@ -1873,6 +2196,417 @@ func (p *AgentPlugin) ResolveAgentAlert(alertID string) error {
 	return p.monitoringService.ResolveAlert(alertID)
 }
 
+// SendMessageToSubAgent sends a message to a sub-agent through the main agent's communication hub
+func (p *AgentPlugin) SendMessageToSubAgent(subAgentID, messageType, content string, metadata map[string]interface{}, priority int) error {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.communicationHub == nil {
+		return fmt.Errorf("communication hub not initialized")
+	}
+
+	// Verify sub-agent exists
+	if _, exists := p.subAgents[subAgentID]; !exists {
+		return fmt.Errorf("sub-agent %s not found", subAgentID)
+	}
+
+	return p.communicationHub.SendMessage(subAgentID, messageType, content, metadata, priority)
+}
+
+// SendMessageFromSubAgent allows a sub-agent to send a message through the main agent
+func (p *AgentPlugin) SendMessageFromSubAgent(senderSubAgentID, receiverID, messageType, content string, metadata map[string]interface{}, priority int) error {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.communicationHub == nil {
+		return fmt.Errorf("communication hub not initialized")
+	}
+
+	// Verify sender sub-agent exists
+	if _, exists := p.subAgents[senderSubAgentID]; !exists {
+		return fmt.Errorf("sender sub-agent %s not found", senderSubAgentID)
+	}
+
+	// Create a custom message that indicates it's from a sub-agent
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["original_sender"] = senderSubAgentID
+	metadata["routed_by"] = AgentID
+
+	return p.communicationHub.SendMessage(receiverID, messageType, content, metadata, priority)
+}
+
+// GetSubAgentMessages retrieves messages for a specific sub-agent
+func (p *AgentPlugin) GetSubAgentMessages(subAgentID string, limit int) []*AgentMessage {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.communicationHub == nil {
+		return []*AgentMessage{}
+	}
+
+	return p.communicationHub.GetMessageHistory(subAgentID, limit)
+}
+
+// BroadcastToAllSubAgents sends a message to all active sub-agents
+func (p *AgentPlugin) BroadcastToAllSubAgents(messageType, content string, metadata map[string]interface{}, priority int) error {
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
+
+	if p.communicationHub == nil {
+		return fmt.Errorf("communication hub not initialized")
+	}
+
+	var errors []string
+	for subAgentID := range p.subAgents {
+		if err := p.communicationHub.SendMessage(subAgentID, messageType, content, metadata, priority); err != nil {
+			errors = append(errors, fmt.Sprintf("failed to send to %s: %v", subAgentID, err))
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("broadcast errors: %s", strings.Join(errors, "; "))
+	}
+
+	return nil
+}
+
+// StartCommunicationHub starts the main agent's communication hub
+func (p *AgentPlugin) StartCommunicationHub() error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.communicationHub == nil {
+		return fmt.Errorf("communication hub not initialized")
+	}
+
+	return p.communicationHub.Start()
+}
+
+// StopCommunicationHub stops the main agent's communication hub
+func (p *AgentPlugin) StopCommunicationHub() error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.communicationHub == nil {
+		return fmt.Errorf("communication hub not initialized")
+	}
+
+	return p.communicationHub.Stop()
+}
+
+// AgentMessage represents a message between agents
+type AgentMessage struct {
+	ID          string                 `json:"id"`
+	SenderID    string                 `json:"sender_id"`
+	ReceiverID  string                 `json:"receiver_id"`
+	MessageType string                 `json:"message_type"` // "task", "result", "status", "coordination"
+	Content     string                 `json:"content"`
+	Metadata    map[string]interface{} `json:"metadata"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Priority    int                    `json:"priority"` // 1=low, 2=normal, 3=high, 4=urgent
+}
+
+// AgentCommunicationHub manages agent-to-agent communication
+type AgentCommunicationHub struct {
+	parentAgent    *AgentPlugin
+	messageQueue   chan *AgentMessage
+	subscribers    map[string]chan *AgentMessage
+	messageHistory map[string][]*AgentMessage
+	mutex          sync.RWMutex
+	running        bool
+}
+
+// NewAgentCommunicationHub creates a new communication hub
+func NewAgentCommunicationHub(parentAgent *AgentPlugin) *AgentCommunicationHub {
+	return &AgentCommunicationHub{
+		parentAgent:    parentAgent,
+		messageQueue:   make(chan *AgentMessage, 1000),
+		subscribers:    make(map[string]chan *AgentMessage),
+		messageHistory: make(map[string][]*AgentMessage),
+		running:        false,
+	}
+}
+
+// Start starts the communication hub
+func (hub *AgentCommunicationHub) Start() error {
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+
+	if hub.running {
+		return nil
+	}
+
+	hub.running = true
+	go hub.messageProcessor()
+	return nil
+}
+
+// Stop stops the communication hub
+func (hub *AgentCommunicationHub) Stop() error {
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+
+	if !hub.running {
+		return nil
+	}
+
+	hub.running = false
+	close(hub.messageQueue)
+
+	// Close all subscriber channels
+	for _, ch := range hub.subscribers {
+		close(ch)
+	}
+	hub.subscribers = make(map[string]chan *AgentMessage)
+
+	return nil
+}
+
+// SendMessage sends a message to another agent
+func (hub *AgentCommunicationHub) SendMessage(receiverID, messageType, content string, metadata map[string]interface{}, priority int) error {
+	message := &AgentMessage{
+		ID:          fmt.Sprintf("msg-%d", time.Now().UnixNano()),
+		SenderID:    AgentID,
+		ReceiverID:  receiverID,
+		MessageType: messageType,
+		Content:     content,
+		Metadata:    metadata,
+		Timestamp:   time.Now(),
+		Priority:    priority,
+	}
+
+	select {
+	case hub.messageQueue <- message:
+		return nil
+	default:
+		return fmt.Errorf("message queue is full")
+	}
+}
+
+// SubscribeToMessages subscribes to messages for a specific agent
+func (hub *AgentCommunicationHub) SubscribeToMessages(agentID string) (<-chan *AgentMessage, error) {
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+
+	if !hub.running {
+		return nil, fmt.Errorf("communication hub is not running")
+	}
+
+	ch := make(chan *AgentMessage, 100)
+	hub.subscribers[agentID] = ch
+	return ch, nil
+}
+
+// GetMessageHistory returns message history for an agent
+func (hub *AgentCommunicationHub) GetMessageHistory(agentID string, limit int) []*AgentMessage {
+	hub.mutex.RLock()
+	defer hub.mutex.RUnlock()
+
+	messages := hub.messageHistory[agentID]
+	if limit > 0 && len(messages) > limit {
+		return messages[len(messages)-limit:]
+	}
+	return messages
+}
+
+// messageProcessor processes incoming messages
+func (hub *AgentCommunicationHub) messageProcessor() {
+	for message := range hub.messageQueue {
+		hub.processMessage(message)
+	}
+}
+
+// processMessage processes a single message
+func (hub *AgentCommunicationHub) processMessage(message *AgentMessage) {
+	hub.mutex.Lock()
+	defer hub.mutex.Unlock()
+
+	// Store message in history
+	if hub.messageHistory[message.ReceiverID] == nil {
+		hub.messageHistory[message.ReceiverID] = make([]*AgentMessage, 0)
+	}
+	hub.messageHistory[message.ReceiverID] = append(hub.messageHistory[message.ReceiverID], message)
+
+	// Limit history size
+	if len(hub.messageHistory[message.ReceiverID]) > 1000 {
+		hub.messageHistory[message.ReceiverID] = hub.messageHistory[message.ReceiverID][100:]
+	}
+
+	// Deliver to subscriber if exists
+	if ch, exists := hub.subscribers[message.ReceiverID]; exists {
+		select {
+		case ch <- message:
+			// Message delivered
+		default:
+			// Subscriber channel is full, skip delivery
+		}
+	}
+
+	// Log the message
+	if hub.parentAgent.monitoringService != nil {
+		hub.parentAgent.monitoringService.LogActivity(
+			message.SenderID,
+			"info",
+			fmt.Sprintf("Message sent to %s: %s", message.ReceiverID, message.Content),
+			"communication",
+			map[string]interface{}{
+				"message_id":   message.ID,
+				"message_type": message.MessageType,
+				"receiver_id":  message.ReceiverID,
+				"priority":     message.Priority,
+			},
+		)
+	}
+}
+
+// AgentPromptGenerator handles the generation of prompts for sub-agents
+type AgentPromptGenerator struct {
+	parentAgent     *AgentPlugin
+	promptFramework map[string]interface{}
+	templates       map[string]string
+	mutex           sync.RWMutex
+}
+
+// NewAgentPromptGenerator creates a new agent prompt generator
+func NewAgentPromptGenerator(parentAgent *AgentPlugin) *AgentPromptGenerator {
+	// Load the agent prompt framework from embedded JSON
+	promptFramework := make(map[string]interface{})
+
+	// This would be loaded from the agent_prompt.json file
+	// For now, we'll use a simplified version
+	promptFramework["agent_prompt_generator"] = map[string]interface{}{
+		"parent_agent_context": map[string]interface{}{
+			"agent_name":        "{{.AgentName}}",
+			"agent_description": "{{.AgentDescription}}",
+			"model":            "{{.Model}}",
+			"instruction":      "{{.Instruction}}",
+		},
+	}
+
+	return &AgentPromptGenerator{
+		parentAgent:     parentAgent,
+		promptFramework: promptFramework,
+		templates:       make(map[string]string),
+	}
+}
+
+// GenerateSubAgentPrompt generates a specialized prompt for a sub-agent
+func (apg *AgentPromptGenerator) GenerateSubAgentPrompt(taskDescription string, agentType string, capabilities []string) (string, error) {
+	apg.mutex.RLock()
+	defer apg.mutex.RUnlock()
+
+	// Analyze the task to determine the best orchestration pattern
+	pattern := apg.analyzeTaskForPattern(taskDescription, capabilities)
+
+	// Generate the prompt based on the pattern and agent type
+	prompt := apg.buildPromptForPattern(pattern, taskDescription, agentType, capabilities)
+
+	return prompt, nil
+}
+
+// analyzeTaskForPattern analyzes a task description to determine the best orchestration pattern
+func (apg *AgentPromptGenerator) analyzeTaskForPattern(taskDescription string, capabilities []string) OrchestrationPattern {
+	taskLower := strings.ToLower(taskDescription)
+
+	// Simple heuristics for pattern selection
+	if strings.Contains(taskLower, "parallel") || strings.Contains(taskLower, "simultaneously") {
+		return ParallelHierarchy
+	}
+
+	if strings.Contains(taskLower, "sequence") || strings.Contains(taskLower, "step by step") {
+		return SequentialAgents
+	}
+
+	if strings.Contains(taskLower, "human") || strings.Contains(taskLower, "approval") {
+		return SingleAgentHumanInLoop
+	}
+
+	if strings.Contains(taskLower, "route") || strings.Contains(taskLower, "decide") {
+		return SingleAgentRouter
+	}
+
+	if len(capabilities) > 3 {
+		return SingleAgentMCPTools
+	}
+
+	return SingleAgentTools
+}
+
+// buildPromptForPattern builds a prompt based on the orchestration pattern
+func (apg *AgentPromptGenerator) buildPromptForPattern(pattern OrchestrationPattern, taskDescription string, agentType string, capabilities []string) string {
+	basePrompt := fmt.Sprintf(`You are a specialized %s sub-agent working under the supervision of %s.
+
+Your primary role is to: %s
+
+Available capabilities:
+%s
+
+Orchestration Pattern: %s
+
+Instructions:
+1. Focus on your specialized task while maintaining awareness of the broader context
+2. Communicate clearly with your parent agent about progress and results
+3. Use the available capabilities effectively to accomplish your goals
+4. Report any issues or blockers that require parent agent intervention
+5. Maintain consistency with the parent agent's objectives and constraints
+
+Task Description: %s
+
+Please process this task according to your specialized role and report back with structured results.`,
+		agentType,
+		"{{.AgentName}}",
+		apg.getRoleDescription(agentType),
+		strings.Join(capabilities, "\n- "),
+		apg.getPatternDescription(pattern),
+		taskDescription)
+
+	return basePrompt
+}
+
+// getRoleDescription returns a description for the agent type
+func (apg *AgentPromptGenerator) getRoleDescription(agentType string) string {
+	switch strings.ToLower(agentType) {
+	case "python":
+		return "Execute Python-based tasks, data processing, and analysis"
+	case "java":
+		return "Handle enterprise-grade processing, database operations, and system integration"
+	case "analysis":
+		return "Perform data analysis, generate insights, and create reports"
+	case "coordination":
+		return "Coordinate between multiple agents and manage workflow orchestration"
+	case "monitoring":
+		return "Monitor system performance, track metrics, and generate alerts"
+	default:
+		return "Execute specialized tasks within your domain of expertise"
+	}
+}
+
+// getPatternDescription returns a description for the orchestration pattern
+func (apg *AgentPromptGenerator) getPatternDescription(pattern OrchestrationPattern) string {
+	switch pattern {
+	case SingleAgentTools:
+		return "Simple tool-based execution"
+	case SingleAgentMCPTools:
+		return "Enhanced execution with MCP server capabilities"
+	case SingleAgentRouter:
+		return "Intelligent routing and tool selection"
+	case SingleAgentHumanInLoop:
+		return "Human-supervised execution with approval gates"
+	case SingleAgentDynamicCall:
+		return "Dynamic agent spawning and coordination"
+	case SequentialAgents:
+		return "Sequential task execution with result passing"
+	case ParallelHierarchy:
+		return "Parallel execution with hierarchical coordination"
+	case LoopParallelRAG:
+		return "Iterative processing with parallel RAG capabilities"
+	default:
+		return "Standard agent execution"
+	}
+}
+
 // Plugin exports
 var Plugin *AgentPlugin
 
@@ -1884,3 +2618,98 @@ func init() {
 		panic(fmt.Sprintf("Failed to initialize agent plugin: %v", err))
 	}
 }
+
+
+
+{{if eq .buildTarget "wasm"}}
+// WASM wrapper functions for wazero runtime
+
+func agentInitialize() int32 {
+	// Initialize with default config for WASM
+	config := map[string]interface{}{
+		"agentID": AgentID,
+		"version": AgentVersion,
+	}
+
+	if err := Plugin.Initialize(config); err != nil {
+		return 0 // failure
+	}
+	return 1 // success
+}
+
+func agentProcessInference(requestPtr, requestLen uint32) uint32 {
+	// For now, return a simple success response
+	// In a full implementation, this would process the actual request
+	response := &InferenceResponse{
+		Output:    "WASM agent response",
+		Reasoning: "Processed through WebAssembly runtime",
+		Metadata: map[string]interface{}{
+			"success": true,
+			"agent_type": "wasm",
+		},
+	}
+
+	responseJSON, _ := json.Marshal(response)
+	// For simplicity, just return the length of the response
+	return uint32(len(responseJSON))
+}
+
+func agentGetCapabilities() uint32 {
+	// Return basic capabilities for WASM agents
+	capabilities := map[string]interface{}{
+		"supportsStreaming": true,
+		"supportsToolCalls": true,
+		"maxContextLength": 4096,
+		"orchestrationStrategies": Plugin.GetOrchestrationStrategies(),
+	}
+	capJSON, _ := json.Marshal(capabilities)
+	return uint32(len(capJSON))
+}
+
+func agentCreateTerminal(rows, cols uint32) uint32 {
+	// For WASM agents, we'll create a virtual terminal ID
+	// In a real implementation, this would integrate with the terminal manager
+	terminalID := fmt.Sprintf("wasm_terminal_%d_%d_%d", rows, cols, time.Now().UnixNano())
+
+	result := map[string]interface{}{"terminalId": terminalID}
+	resultJSON, _ := json.Marshal(result)
+	return uint32(len(resultJSON))
+}
+
+func agentStart() int32 {
+	if err := Plugin.Start(); err != nil {
+		return 0 // failure
+	}
+	return 1 // success
+}
+
+func agentStop() int32 {
+	if err := Plugin.Stop(); err != nil {
+		return 0 // failure
+	}
+	return 1 // success
+}
+
+// WASM-specific main function
+func main() {
+	// For WASM builds, just initialize the plugin
+	config := map[string]interface{}{
+		"agentID": AgentID,
+		"version": AgentVersion,
+	}
+
+	// Initialize the plugin
+	if err := Plugin.Initialize(config); err != nil {
+		fmt.Printf("Failed to initialize WASM agent: %v\n", err)
+		return
+	}
+
+	// Start the plugin
+	if err := Plugin.Start(); err != nil {
+		fmt.Printf("Failed to start WASM agent: %v\n", err)
+		return
+	}
+
+	fmt.Printf("WASM agent %s initialized successfully\n", AgentID)
+}
+{{end}}

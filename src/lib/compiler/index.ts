@@ -13,6 +13,7 @@ export class AgentCompiler {
   private rootDir: string;
   private templateDir: string;
   private outputDir: string;
+  private compilationLogs: string[] = [];
 
   /**
    * Constructor
@@ -37,35 +38,56 @@ export class AgentCompiler {
     }
   }
 
+  private addLog(message: string) {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = `[${timestamp}] ${message}`;
+    this.compilationLogs.push(logEntry);
+    console.log(logEntry);
+  }
+
+  public getCompilationLogs(): string[] {
+    return [...this.compilationLogs];
+  }
+
+  public clearLogs() {
+    this.compilationLogs = [];
+  }
+
   /**
    * Compiles an agent configuration into a plugin binary
    * @param config The agent configuration
    * @returns A promise that resolves to the path of the compiled plugin
    */
   async compileAgent(config: AgentPluginConfig): Promise<string> {
-    console.log(`🔨 Starting compilation for agent: ${config.agent_name}`);
+    this.clearLogs(); // Clear previous logs
+    this.addLog(`🔨 Starting compilation for agent: ${config.agent_name}`);
 
     // 1. Create a temporary build directory
     const buildDir = await this.createBuildDirectory(config);
 
     try {
       // 2. Generate Go code from templates
+      this.addLog('🔧 Generating Go code...');
       await this.generateGoCode(buildDir, config);
 
       // 3. Embed resources and prompts
+      this.addLog('📦 Embedding resources...');
       await this.embedResources(buildDir, config);
 
       // 4. Generate Python agent service code
+      this.addLog('🐍 Generating Python service...');
       await this.generatePythonService(buildDir, config);
 
-      // 5. Compile the Go plugin
-      const pluginPath = await this.compileGoPlugin(buildDir, config);
+      // 5. Compile the plugin (WASM or Go)
+      const pluginPath = config.buildTarget === 'wasm'
+        ? await this.compileWasmPlugin(buildDir, config)
+        : await this.compileGoPlugin(buildDir, config);
 
-      console.log(`✅ Compilation successful: ${pluginPath}`);
+      this.addLog(`✅ Compilation successful: ${pluginPath}`);
       return pluginPath;
 
     } catch (error) {
-      console.error(`❌ Compilation failed:`, error);
+      this.addLog(`❌ Compilation failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     } finally {
       // 6. Clean up temporary files (optional - keep for debugging)
@@ -94,7 +116,7 @@ export class AgentCompiler {
    * Generates Go code from templates
    */
   private async generateGoCode(buildDir: string, config: AgentPluginConfig): Promise<void> {
-    console.log('🔧 Generating Go code...');
+    // Log is already added in the main compile method
 
     // Generate main.go file
     const mainTemplate = await fs.promises.readFile(
@@ -104,6 +126,9 @@ export class AgentCompiler {
 
     const mainCode = this.processTemplate(mainTemplate, config);
     await fs.promises.writeFile(path.join(buildDir, 'main.go'), mainCode);
+
+    this.addLog(`🔧 Generated main.go for build target: ${config.buildTarget || 'go'}`);
+    this.addLog(`📝 First 200 chars: ${mainCode.substring(0, 200)}...`);
 
     // Generate go.mod file
     const goModTemplate = await fs.promises.readFile(
@@ -143,7 +168,7 @@ export class AgentCompiler {
           'utf-8'
         );
 
-        const toolCode = this.processToolTemplate(toolTemplate, tool);
+        const toolCode = this.processToolTemplate(toolTemplate, tool, config);
         await fs.promises.writeFile(
           path.join(buildDir, `tool_${tool.name}.go`),
           toolCode
@@ -151,7 +176,7 @@ export class AgentCompiler {
       }
     }
 
-    console.log('✅ Go code generation complete');
+    this.addLog('✅ Go code generation complete');
   }
 
   /**
@@ -159,6 +184,21 @@ export class AgentCompiler {
    */
   private processTemplate(template: string, config: AgentPluginConfig): string {
     let processed = template;
+
+    // First, handle conditional blocks
+    const buildTarget = config.buildTarget || 'go';
+
+    // Process {{if eq .buildTarget "wasm"}} blocks
+    const wasmIfRegex = /\{\{if eq \.buildTarget "wasm"\}\}([\s\S]*?)\{\{end\}\}/g;
+    processed = processed.replace(wasmIfRegex, (match, content) => {
+      return buildTarget === 'wasm' ? content : '';
+    });
+
+    // Process {{if ne .buildTarget "wasm"}} blocks (for non-WASM)
+    const nonWasmIfRegex = /\{\{if ne \.buildTarget "wasm"\}\}([\s\S]*?)\{\{end\}\}/g;
+    processed = processed.replace(nonWasmIfRegex, (match, content) => {
+      return buildTarget !== 'wasm' ? content : '';
+    });
 
     // Replace basic config variables
     const replacements = {
@@ -184,6 +224,7 @@ export class AgentCompiler {
       // Additional configuration
       '{{.useChromemGo}}': config.useChromemGo ? 'true' : 'false',
       '{{.subAgentCapabilities}}': config.subAgentCapabilities ? 'true' : 'false',
+      '{{.buildTarget}}': buildTarget,
       // LLM configuration
       '{{.defaultProvider}}': 'openai',
       '{{.defaultModel}}': 'gpt-3.5-turbo',
@@ -208,8 +249,23 @@ export class AgentCompiler {
   /**
    * Processes tool template variables
    */
-  private processToolTemplate(template: string, tool: ToolConfig): string {
+  private processToolTemplate(template: string, tool: ToolConfig, config: AgentPluginConfig): string {
     let processed = template;
+
+    // First, handle conditional blocks for buildTarget
+    const buildTarget = config.buildTarget || 'go';
+
+    // Process {{if eq .buildTarget "wasm"}} blocks
+    const wasmIfRegex = /\{\{if eq \.buildTarget "wasm"\}\}([\s\S]*?)\{\{end\}\}/g;
+    processed = processed.replace(wasmIfRegex, (match, content) => {
+      return buildTarget === 'wasm' ? content : '';
+    });
+
+    // Process {{if ne .buildTarget "wasm"}} blocks (for non-WASM)
+    const nonWasmIfRegex = /\{\{if ne \.buildTarget "wasm"\}\}([\s\S]*?)\{\{end\}\}/g;
+    processed = processed.replace(nonWasmIfRegex, (match, content) => {
+      return buildTarget !== 'wasm' ? content : '';
+    });
 
     // Generate parameter parsing code
     let parameterParsing = '';
@@ -262,7 +318,8 @@ export class AgentCompiler {
       '{{.toolDescription}}': tool.description || '',
       '{{.toolParameters}}': JSON.stringify(tool.parameters || {}),
       '{{.toolImplementation}}': goImplementation,
-      '{{.parameterParsing}}': parameterParsing
+      '{{.parameterParsing}}': parameterParsing,
+      '{{.buildTarget}}': buildTarget
     };
 
     for (const [placeholder, value] of Object.entries(replacements)) {
@@ -276,7 +333,7 @@ export class AgentCompiler {
    * Embeds resources and prompts into the Go code
    */
   private async embedResources(buildDir: string, config: AgentPluginConfig): Promise<void> {
-    console.log('📦 Embedding resources...');
+    // Log is already added in the main compile method
 
     const resourcesTemplate = await fs.promises.readFile(
       path.join(this.templateDir, 'resources.go.template'),
@@ -286,7 +343,7 @@ export class AgentCompiler {
     const resourcesCode = this.processResourcesTemplate(resourcesTemplate, config);
     await fs.promises.writeFile(path.join(buildDir, 'resources.go'), resourcesCode);
 
-    console.log('✅ Resources embedded');
+    this.addLog('✅ Resources embedded');
   }
 
   /**
@@ -321,7 +378,7 @@ export class AgentCompiler {
    * Generates Python agent service code
    */
   private async generatePythonService(buildDir: string, config: AgentPluginConfig): Promise<void> {
-    console.log('🐍 Generating Python service...');
+    // Log is already added in the main compile method
 
     const pythonTemplate = await fs.promises.readFile(
       path.join(this.templateDir, 'agent_service.py.template'),
@@ -344,7 +401,7 @@ export class AgentCompiler {
     const configContent = this.processTemplate(configTemplate, config);
     await fs.promises.writeFile(path.join(buildDir, 'config.env'), configContent);
 
-    console.log('✅ Python service generated');
+    this.addLog('✅ Python service generated');
   }
 
   /**
@@ -444,7 +501,7 @@ export class AgentCompiler {
    * Compiles the Go plugin
    */
   private async compileGoPlugin(buildDir: string, config: AgentPluginConfig): Promise<string> {
-    console.log('🔨 Compiling Go plugin...');
+    this.addLog('🔨 Compiling Go plugin...');
 
     // Determine the output file extension based on the target OS
     const targetOS = process.env.GOOS || process.platform;
@@ -464,11 +521,11 @@ export class AgentCompiler {
     );
 
     // Download Go dependencies (go.mod already created from template)
-    console.log('📦 Downloading Go dependencies...');
+    this.addLog('📦 Downloading Go dependencies...');
     await this.execCommand('go', ['mod', 'tidy'], buildDir);
 
     // Build the Go plugin
-    console.log('🔧 Building Go plugin...');
+    this.addLog('🔧 Building Go plugin...');
     const buildArgs = [
       'build',
       '-buildmode=plugin',
@@ -478,24 +535,137 @@ export class AgentCompiler {
 
     // Add build flags for cross-compilation if needed
     if (process.env.GOOS && process.env.GOOS !== process.platform) {
-      console.log(`🌍 Cross-compiling for ${process.env.GOOS}`);
+      this.addLog(`🌍 Cross-compiling for ${process.env.GOOS}`);
     }
 
     await this.execCommand('go', [...buildArgs, '.'], buildDir);
 
-    console.log(`✅ Plugin compiled: ${outputFile}`);
+    this.addLog(`✅ Plugin compiled: ${outputFile}`);
     return outputFile;
+  }
+
+  /**
+   * Compiles the WASM plugin
+   */
+  private async compileWasmPlugin(buildDir: string, config: AgentPluginConfig): Promise<string> {
+    this.addLog('🔨 Compiling WASM plugin...');
+
+    // Output file path
+    const outputFile = path.join(
+      this.outputDir,
+      'plugins',
+      `agent_${config.agent_id}_${config.version || '1.0.0'}.wasm`
+    );
+
+    // Ensure output directory exists
+    const outputDir = path.dirname(outputFile);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    try {
+      // Download Go dependencies (go.mod already created from template)
+      this.addLog('📦 Downloading Go dependencies...');
+      await this.execCommand('go', ['mod', 'tidy'], buildDir);
+
+      // Build the WASM binary
+      this.addLog('🔧 Building WASM binary...');
+      const buildArgs = [
+        'build',
+        '-ldflags', '-s -w', // Strip debug info to reduce size
+        '-o',
+        outputFile
+      ];
+
+      // Set environment variables for WASM compilation
+      const wasmEnv = {
+        ...process.env,
+        GOOS: 'js',
+        GOARCH: 'wasm',
+        CGO_ENABLED: '0' // Disable CGO for WASM builds
+      };
+
+      this.addLog('🔧 Building with WASM environment: { GOOS: js, GOARCH: wasm }');
+      await this.execCommandWithEnv('go', [...buildArgs, '.'], buildDir, wasmEnv);
+
+      this.addLog(`✅ WASM Plugin compiled: ${outputFile}`);
+      return outputFile;
+    } catch (error) {
+      this.addLog('❌ WASM compilation failed, falling back to Go plugin');
+      this.addLog('🔄 Attempting Go plugin compilation as fallback...');
+
+      // Fallback to Go plugin compilation
+      return await this.compileGoPlugin(buildDir, config);
+    }
   }
 
   /**
    * Executes a command and returns a promise
    */
   private execCommand(command: string, args: string[], cwd: string): Promise<void> {
+    return this.execCommandWithEnv(command, args, cwd, process.env);
+  }
+
+  /**
+   * Executes a command with custom environment and returns a promise
+   */
+  private execCommandWithEnv(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
     return new Promise((resolve, reject) => {
-      const childProcess = child_process.spawn(command, args, {
+      // For Go commands, try to use the full path if available
+      let execCommand = command;
+      let updatedEnv = { ...env };
+
+      if (command === 'go') {
+        // Try common Go installation paths
+        const goPaths = [
+          '/usr/local/go/bin/go',
+          '/usr/bin/go',
+          '/opt/go/bin/go',
+          '/home/linuxbrew/.linuxbrew/bin/go'
+        ];
+
+        for (const goPath of goPaths) {
+          if (fs.existsSync(goPath)) {
+            execCommand = goPath;
+            this.addLog(`🐹 Using Go binary at: ${goPath}`);
+            break;
+          }
+        }
+
+        // Ensure Go paths are in PATH
+        const goBinPaths = [
+          '/usr/local/go/bin',
+          '/usr/bin',
+          '/opt/go/bin',
+          '/home/linuxbrew/.linuxbrew/bin'
+        ];
+
+        const currentPath = updatedEnv.PATH || '';
+        const newPath = [...goBinPaths, ...currentPath.split(':')].join(':');
+        updatedEnv.PATH = newPath;
+
+        this.addLog(`🔧 Updated PATH for Go: ${newPath}`);
+      }
+
+      this.addLog(`🚀 Executing: ${execCommand} ${args.join(' ')}`);
+      this.addLog(`📁 Working directory: ${cwd}`);
+
+      const childProcess = child_process.spawn(execCommand, args, {
         cwd,
-        stdio: 'inherit',
-        env: { ...process.env }
+        stdio: ['pipe', 'pipe', 'pipe'], // Capture stdout and stderr
+        env: updatedEnv
+      });
+
+      // Capture and log stdout
+      childProcess.stdout?.on('data', (data) => {
+        const output = data.toString();
+        this.addLog(`📤 [${command}] ${output.trim()}`);
+      });
+
+      // Capture and log stderr
+      childProcess.stderr?.on('data', (data) => {
+        const output = data.toString();
+        this.addLog(`📤 [${command}] ${output.trim()}`);
       });
 
       childProcess.on('close', (code) => {

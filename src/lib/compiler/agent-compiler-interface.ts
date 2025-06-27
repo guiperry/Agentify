@@ -64,6 +64,8 @@ export interface AgentPluginConfig {
   ttl: number; // in seconds
   // Cryptographic signature from registry resolver
   signature: string;
+  // Build target for compilation
+  buildTarget?: 'wasm' | 'go';
   // Tool configurations
   tools: ToolConfig[];
   // Resource configurations
@@ -141,6 +143,12 @@ export interface AgentCompilerService {
    * @returns The path to the default output directory
    */
   getDefaultOutputDir(): string;
+
+  /**
+   * Gets the compilation logs from the last compilation
+   * @returns Array of log messages
+   */
+  getCompilationLogs(): string[];
 }
 
 /**
@@ -350,7 +358,9 @@ export async function createAgentCompilerService(): Promise<AgentCompilerService
     },
     
     getDefaultTemplateDir: () => defaultTemplateDir,
-    
-    getDefaultOutputDir: () => defaultOutputDir
+
+    getDefaultOutputDir: () => defaultOutputDir,
+
+    getCompilationLogs: () => compiler.getCompilationLogs()
   };
 }

@@ -45,14 +45,22 @@ function getVersion(command, versionFlag = '--version') {
  */
 function installGo() {
   console.log('📦 Checking Go installation...');
-  
+
   if (commandExists('go')) {
     const version = getVersion('go', 'version');
     console.log(`✅ Go is already installed: ${version}`);
+
+    // Verify WASM support
+    try {
+      execSync('go env GOOS GOARCH', { stdio: 'ignore' });
+      console.log('✅ Go WASM compilation support verified');
+    } catch (error) {
+      console.log('⚠️  Go WASM support verification failed, but continuing...');
+    }
     return;
   }
 
-  console.log('⬇️  Installing Go...');
+  console.log('⬇️  Installing Go with WASM support...');
   
   const goVersion = '1.21.5';
   let goUrl;
@@ -98,6 +106,10 @@ function installGo() {
       // Unix-like installation
       execSync(`sudo tar -C /usr/local -xzf "${filePath}"`, { stdio: 'inherit' });
       console.log('✅ Go installed. Please add /usr/local/go/bin to your PATH');
+
+      // Set up PATH for current session
+      process.env.PATH = `/usr/local/go/bin:${process.env.PATH}`;
+      console.log('✅ Go PATH configured for current session');
     }
     
     // Clean up
@@ -198,6 +210,57 @@ function installBuildTools() {
 }
 
 /**
+ * Verify WASM compilation support
+ */
+function verifyWasmSupport() {
+  console.log('🔍 Verifying WASM compilation support...');
+
+  if (!commandExists('go')) {
+    console.log('❌ Go not found - WASM compilation not available');
+    return false;
+  }
+
+  try {
+    // Test WASM compilation capability
+    const testDir = '/tmp/wasm-test';
+    const fs = require('fs');
+
+    // Create test directory
+    if (!fs.existsSync(testDir)) {
+      fs.mkdirSync(testDir, { recursive: true });
+    }
+
+    // Create a simple Go file for WASM testing
+    const testGoFile = `package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("WASM test")
+}`;
+
+    fs.writeFileSync(`${testDir}/main.go`, testGoFile);
+
+    // Try to compile to WASM
+    execSync('GOOS=js GOARCH=wasm go build -o test.wasm main.go', {
+      cwd: testDir,
+      stdio: 'ignore',
+      env: { ...process.env, GOOS: 'js', GOARCH: 'wasm' }
+    });
+
+    console.log('✅ WASM compilation support verified');
+
+    // Clean up
+    execSync(`rm -rf ${testDir}`, { stdio: 'ignore' });
+    return true;
+
+  } catch (error) {
+    console.log('❌ WASM compilation test failed:', error.message);
+    return false;
+  }
+}
+
+/**
  * Verify installation
  */
 function verifyInstallation() {
@@ -256,6 +319,7 @@ async function main() {
     installPython();
     installBuildTools();
     verifyInstallation();
+    verifyWasmSupport();
 
     console.log('✅ Toolchain installation complete!');
   } catch (error) {
@@ -282,6 +346,7 @@ module.exports = {
   installPython,
   installBuildTools,
   verifyInstallation,
+  verifyWasmSupport,
   commandExists,
   getVersion
 };

@@ -6,7 +6,7 @@ import { sendCompilationUpdate } from '@/lib/websocket-utils';
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-    const { agentConfig, advancedSettings, selectedPlatform } = payload;
+    const { agentConfig, advancedSettings, selectedPlatform, buildTarget } = payload;
 
     if (!agentConfig) {
       return NextResponse.json({
@@ -60,10 +60,13 @@ export async function POST(request: Request) {
         networkAccess: advancedSettings.networkAccess,
         fileSystemAccess: advancedSettings.fileSystemAccess
       };
-      
+
       pluginConfig.useChromemGo = advancedSettings.useChromemGo;
       pluginConfig.subAgentCapabilities = advancedSettings.subAgentCapabilities;
     }
+
+    // Set build target (default to WASM)
+    pluginConfig.buildTarget = buildTarget || 'wasm';
 
     // Handle platform-specific settings
     if (selectedPlatform === 'windows') {
@@ -77,6 +80,9 @@ export async function POST(request: Request) {
     // Compile the agent
     const pluginPath = await compilerService.compileAgent(pluginConfig);
 
+    // Get compilation logs
+    const compilationLogs = compilerService.getCompilationLogs();
+
     // Extract filename from the plugin path for download URL
     const filename = pluginPath.split('/').pop() || '';
     const downloadUrl = `/api/download/plugin/${filename}`;
@@ -87,6 +93,7 @@ export async function POST(request: Request) {
       pluginPath,
       downloadUrl,
       filename,
+      logs: compilationLogs,
       message: 'Agent compiled successfully'
     });
   } catch (error) {

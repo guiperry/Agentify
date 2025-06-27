@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Upload, FileText, CheckCircle, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import MiniLoadingScreen from "./MiniLoadingScreen";
 
 interface ImportConfigModalProps {
   open: boolean;
@@ -111,10 +112,13 @@ const ImportConfigModal = ({ open, onOpenChange, onFileUpload }: ImportConfigMod
             />
             
             {isUploading ? (
-              <div className="space-y-2">
-                <div className="animate-spin h-8 w-8 border-2 border-purple-400 border-t-transparent rounded-full mx-auto"></div>
-                <p className="text-white/70">Uploading...</p>
-              </div>
+              <MiniLoadingScreen
+                message="Uploading configuration file..."
+                overlay={false}
+                icon="logo"
+                size="small"
+                animated={true}
+              />
             ) : uploadedFile && !uploadError ? (
               <div className="space-y-2">
                 <CheckCircle className="h-8 w-8 text-green-400 mx-auto" />

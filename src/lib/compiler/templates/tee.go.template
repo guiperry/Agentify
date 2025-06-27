@@ -39,8 +39,33 @@ type TEE interface {
 	CopyFileOut(teePath, localPath string) error
 }
 
+// ValidateTEEConfig validates TEE configuration against platform constraints
+func ValidateTEEConfig(config TEEConfig) error {
+	// Validate resource limits
+	if config.ResourceLimits.MemoryMB <= 0 {
+		return fmt.Errorf("memory limit must be positive")
+	}
+	if config.ResourceLimits.CPUCores <= 0 {
+		return fmt.Errorf("CPU cores must be positive")
+	}
+	if config.ResourceLimits.TimeoutSec <= 0 {
+		return fmt.Errorf("timeout must be positive")
+	}
+
+	// Check against platform limits (if available)
+	// In a production system, this would query the platform TEE manager
+	// for maximum allowed resource limits
+
+	return nil
+}
+
 // TEEFactory creates TEE instances based on configuration
 func TEEFactory(config TEEConfig) (TEE, error) {
+	// Validate configuration first
+	if err := ValidateTEEConfig(config); err != nil {
+		return nil, fmt.Errorf("invalid TEE configuration: %v", err)
+	}
+
 	switch config.IsolationLevel {
 	case "process":
 		return NewProcessTEE(config), nil

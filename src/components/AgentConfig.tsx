@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Bot, Brain, Zap, Settings, Sparkles, Plus, Trash2, Server, Code, TestTube, Upload, FileText, CheckCircle, XCircle, Download, Share, Key } from "lucide-react";
+import { Bot, Brain, Zap, Settings, Sparkles, Plus, Trash2, Server, Code, TestTube, Upload, FileText, CheckCircle, XCircle, Download, Share, Key, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import AgentHeaderActions from "@/components/AgentHeaderActions";
 import CompilerPanel from "@/components/deployer/CompilerPanel";
@@ -149,6 +149,9 @@ const AgentConfig = ({
   const [configProcessComplete, setConfigProcessComplete] = useState(false);
   const [agentMinted, setAgentMinted] = useState(false);
   const [compilationComplete, setCompilationComplete] = useState(false);
+  const [isCompiling, setIsCompiling] = useState(false);
+  const [compileStatus, setCompileStatus] = useState<'idle' | 'compiling' | 'success' | 'error'>('idle');
+  const [selectedBuildTarget, setSelectedBuildTarget] = useState<'wasm' | 'go'>('wasm');
   const [agentRegistered, setAgentRegistered] = useState(false);
   const [activeTab, setActiveTab] = useState('identity');
 
@@ -485,6 +488,77 @@ const AgentConfig = ({
     setMcpServers(prev => prev.map(server =>
       server.id === id ? { ...server, enabled: !server.enabled } : server
     ));
+  };
+
+  const handleCompile = async () => {
+    setIsCompiling(true);
+    setCompileStatus('compiling');
+
+    // Navigate to compiler logs tab when compilation starts
+    setActiveTab('compiler');
+
+    try {
+      const agentConfig = {
+        name: agentName,
+        personality,
+        instructions,
+        features,
+        settings: {
+          mcpServers,
+          creativity: creativity[0]
+        }
+      };
+
+      const payload = {
+        agentConfig,
+        buildTarget: selectedBuildTarget,
+        advancedSettings: {
+          isolationLevel: 'process',
+          memoryLimit: 512,
+          cpuCores: 1,
+          timeLimit: 60,
+          networkAccess: true,
+          fileSystemAccess: false,
+          useChromemGo: true,
+          subAgentCapabilities: false
+        }
+      };
+
+      const response = await fetch('/api/compile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || 'Failed to compile agent');
+      }
+
+      setCompileStatus('success');
+      setCompilationComplete(true);
+      setCompletedTabs(prev => new Set(prev).add('compile'));
+
+      toast({
+        title: "Compilation Successful",
+        description: "Your agent has been compiled successfully!",
+      });
+
+    } catch (error) {
+      console.error("Compilation error:", error);
+      setCompileStatus('error');
+
+      toast({
+        title: "Compilation Failed",
+        description: error instanceof Error ? error.message : "Unknown compilation error",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCompiling(false);
+    }
   };
 
   const processConfiguration = async () => {
@@ -1576,6 +1650,55 @@ const AgentConfig = ({
 
           </Tabs>
 
+          {/* Compile Agent Section */}
+          <div className="mt-6 space-y-4">
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <label className="text-sm font-medium text-white">Build Target:</label>
+                <select
+                  value={selectedBuildTarget}
+                  onChange={(e) => setSelectedBuildTarget(e.target.value as 'wasm' | 'go')}
+                  className="bg-slate-700 border border-slate-600 text-white rounded px-3 py-1 text-sm"
+                >
+                  <option value="wasm">WebAssembly (WASM)</option>
+                  <option value="go">Go Plugin (Fallback)</option>
+                </select>
+              </div>
+              <Button
+                onClick={handleCompile}
+                disabled={!agentRegistered || isCompiling}
+                className={`${
+                  agentRegistered && !isCompiling
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white'
+                    : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                }`}
+                size="lg"
+              >
+                {isCompiling ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Compiling...
+                  </>
+                ) : (
+                  <>
+                    <Code className="mr-2 h-4 w-4" />
+                    Compile Agent
+                  </>
+                )}
+              </Button>
+            </div>
+            {compileStatus === 'success' && (
+              <div className="text-green-400 text-sm">
+                ✅ Agent compiled successfully! Ready for deployment.
+              </div>
+            )}
+            {compileStatus === 'error' && (
+              <div className="text-red-400 text-sm">
+                ❌ Compilation failed. Check the Compiler Logs tab for details.
+              </div>
+            )}
+          </div>
+
           {/* Register Agent and Process Configuration Buttons */}
           <div className="flex justify-start space-x-4 items-center">
             {/* Register Agent Button */}
@@ -1622,13 +1745,7 @@ const AgentConfig = ({
               )}
             </Button>
 
-            {/* SSE Status Indicator */}
-            <div className="flex items-center space-x-2 text-sm">
-              <div className={`w-2 h-2 rounded-full ${sseConnected ? 'bg-green-400' : 'bg-red-400'}`} />
-              <span className="text-white/70">
-                SSE: {sseConnected ? 'Connected' : 'Disconnected'}
-              </span>
-            </div>
+
           </div>
 
           {/* Processing Status - Only shown during processing */}
