@@ -1,0 +1,248 @@
+// Auto-generated Netlify function from Next.js API route
+// Original route: /api/compile
+// Generated: 2025-06-27T20:04:14.851Z
+
+// NextResponse/NextRequest converted to native Netlify response format
+const { createAgentCompilerService } = require('../../lib/compiler/agent-compiler-interface');
+const { sendCompilationUpdate } = require('../../lib/websocket-utils');
+const { createGitHubActionsCompiler } = require('../../lib/github-actions-compiler');
+
+// CORS headers for all responses
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS'
+};
+
+async function POST(event, context) {
+  // Extract route parameters if this is a dynamic route
+  if (event.pathParameters) {
+    event.params = event.pathParameters;
+  }
+
+  // Parse request body if present
+  let requestBody = {};
+  if (event.body) {
+    try {
+      requestBody = JSON.parse(event.body);
+    } catch (e) {
+      requestBody = event.body;
+    }
+  }
+  
+
+  try {
+    const payload = requestBody;
+    const { agentConfig, advancedSettings, selectedPlatform, buildTarget } = payload;
+
+    if (!agentConfig) {
+      return {
+      statusCode: 400,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({success,
+        message: 'Missing agent configuration'})
+    };
+    }
+
+    // Send initial compilation update
+    await sendCompilationUpdate('initialization', 10, 'Initializing compiler service...');
+
+    // Initialize the compiler service
+    const compilerService = await createAgentCompilerService();
+
+    // Create a UI config object that matches the expected format for conversion
+    const uiConfigForConversion = {
+      name: agentConfig.name,
+      personality: agentConfig.personality,
+      instructions: agentConfig.instructions || `You are ${agentConfig.name}, a helpful AI assistant.`,
+      features: agentConfig.features,
+      settings: {
+        mcpServers: agentConfig.settings?.mcpServers || [],
+        creativity: agentConfig.settings?.creativity || 0.7
+      }
+    };
+
+    // Send configuration processing update
+    await sendCompilationUpdate('configuration', 30, 'Processing agent configuration...');
+
+    // Convert UI config to compiler config
+    let pluginConfig;
+    try {
+      pluginConfig = compilerService.convertUIConfigToPluginConfig(uiConfigForConversion);
+    } catch (conversionError) {
+      await sendCompilationUpdate('configuration', 30, `Configuration conversion failed: ${conversionError instanceof Error ? conversionError.message : String(conversionError)}`, 'error');
+      return {
+      statusCode: 400,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({success,
+        message: `Configuration conversion failed: ${conversionError instanceof Error ? conversionError.message : String(conversionError)}`})
+    };
+    }
+
+    // Apply advanced settings from the UI
+    if (advancedSettings) {
+      pluginConfig.trustedExecutionEnvironment = {
+        isolationLevel: advancedSettings.isolationLevel,
+        resourceLimits: {
+          memory: advancedSettings.memoryLimit,
+          cpu: advancedSettings.cpuCores,
+          timeLimit: advancedSettings.timeLimit
+        },
+        networkAccess: advancedSettings.networkAccess,
+        fileSystemAccess: advancedSettings.fileSystemAccess
+      };
+
+      pluginConfig.useChromemGo = advancedSettings.useChromemGo;
+      pluginConfig.subAgentCapabilities = advancedSettings.subAgentCapabilities;
+    }
+
+    // Set build target (default to WASM)
+    pluginConfig.buildTarget = buildTarget || 'wasm';
+
+    // Handle platform-specific settings
+    if (selectedPlatform === 'windows') {
+      process.env.GOOS = 'windows';
+    } else if (selectedPlatform === 'mac') {
+      process.env.GOOS = 'darwin';
+    } else {
+      process.env.GOOS = 'linux';
+    }
+
+    // Try local compilation first
+    let pluginPath;
+    let compilationLogs;
+
+    try {
+      // Attempt local compilation
+      await sendCompilationUpdate('compilation', 50, 'Starting local compilation...');
+      pluginPath = await compilerService.compileAgent(pluginConfig);
+      compilationLogs = compilerService.getCompilationLogs();
+      await sendCompilationUpdate('compilation', 90, 'Local compilation completed successfully');
+    } catch (localError) {
+      console.log('Local compilation failed, trying GitHub Actions fallback:', localError);
+      await sendCompilationUpdate('compilation', 60, 'Local compilation failed, using GitHub Actions fallback...');
+
+      // Try GitHub Actions fallback
+      const githubCompiler = createGitHubActionsCompiler();
+      if (!githubCompiler) {
+        throw new Error(`Compilation failed: ${localError instanceof Error ? localError.message : String(localError)}. GitHub Actions fallback is not configured - please contact support.`);
+      }
+
+      try {
+        await sendCompilationUpdate('compilation', 70, 'Triggering GitHub Actions compilation...');
+        const jobId = await githubCompiler.triggerCompilation(pluginConfig);
+
+        await sendCompilationUpdate('compilation', 80, 'GitHub Actions compilation started. Check GitHub Actions tab for progress...');
+        const result = await githubCompiler.waitForCompletion(jobId, 60000); // 1 minute timeout
+
+        if (result.status === 'completed') {
+          // For GitHub Actions, we'll return a different response format
+          pluginPath = result.downloadUrl || '';
+          compilationLogs = ['GitHub Actions compilation completed successfully'];
+          await sendCompilationUpdate('compilation', 100, 'GitHub Actions compilation completed');
+        } else if (result.status === 'failed') {
+          throw new Error(result.error || 'GitHub Actions compilation failed');
+        } else {
+          // Still in progress - return a partial success with instructions
+          await sendCompilationUpdate('compilation', 90, 'GitHub Actions compilation in progress. Check GitHub Actions tab for status.');
+          return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({success,
+            message: 'Compilation started via GitHub Actions. Check the GitHub Actions tab in your repository for progress and download the artifact when complete.',
+            compilationMethod: 'github-actions',
+            status: 'in_progress',
+            jobId,
+            githubActionsUrl: `https://github.com/${process.env.GITHUB_OWNER}/${process.env.GITHUB_REPO}/actions`})
+    };
+        }
+      } catch (githubError) {
+        throw new Error(`All compilation methods failed. Local: ${localError instanceof Error ? localError.message : String(localError)}. GitHub Actions: ${githubError instanceof Error ? githubError.message : String(githubError)}`);
+      }
+    }
+
+    // Extract filename from the plugin path for download URL
+    const isGitHubActionsUsed = pluginPath.startsWith('http');
+    const filename = isGitHubActionsUsed ? `github-actions-${Date.now()}.zip` : (pluginPath.split('/').pop() || '');
+    const downloadUrl = isGitHubActionsUsed ? pluginPath : `/api/download/plugin/${filename}`;
+
+    // Return success response
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({success,
+      pluginPath,
+      downloadUrl,
+      filename,
+      logs,
+      message: isGitHubActionsUsed ? 'Agent compiled successfully via GitHub Actions' : 'Agent compiled successfully',
+      compilationMethod: isGitHubActionsUsed ? 'github-actions' : 'local'})
+    };
+  } catch (error) {
+    console.error('Compilation error:', error);
+    await sendCompilationUpdate('compilation', 0, `Compilation failed: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({success,
+      message: `Compilation failed: ${error instanceof Error ? error.message : String(error)}`})
+    };
+  }
+}
+
+// Main Netlify function handler
+exports.handler = async (event, context) => {
+  // Handle preflight requests
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: corsHeaders,
+      body: ''
+    };
+  }
+
+  try {
+    const method = event.httpMethod;
+    
+    // Add route parameters to event if dynamic route
+    
+    
+    // Route to appropriate handler
+    switch (method) {
+      
+      case 'POST':
+        if (typeof POST === 'function') {
+          const result = await POST(event);
+          return {
+            ...result,
+            headers: { ...corsHeaders, ...(result.headers || {}) }
+          };
+        }
+        break;
+      
+      default:
+        return {
+          statusCode: 405,
+          headers: corsHeaders,
+          body: JSON.stringify({ error: 'Method not allowed' })
+        };
+    }
+    
+    return {
+      statusCode: 404,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: 'Handler not found' })
+    };
+    
+  } catch (error) {
+    console.error('Function error:', error);
+    return {
+      statusCode: 500,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: 'Internal server error' })
+    };
+  }
+};
+
+// Export individual handlers for testing
+exports.post = POST;

@@ -112,24 +112,47 @@ function extractImports(content) {
       return '// NextResponse/NextRequest converted to native Netlify response format';
     }
 
+    // Skip TypeScript type-only imports
+    if (imp.includes('import type')) {
+      return '// TypeScript type import - not needed in JavaScript';
+    }
+
     // Handle different import patterns
     if (imp.includes('import {') && imp.includes('} from')) {
       // import { something } from 'module'
       const match = imp.match(/import\s+\{\s*([^}]+)\s*\}\s+from\s+['"]([^'"]+)['"]/);
       if (match) {
         const [, imports, module] = match;
-        return `const { ${imports.trim()} } = require('${module}');`;
+        const convertedModule = convertModulePath(module);
+        return `const { ${imports.trim()} } = require('${convertedModule}');`;
       }
     } else if (imp.includes('import ') && imp.includes(' from ')) {
       // import something from 'module'
       const match = imp.match(/import\s+(\w+)\s+from\s+['"]([^'"]+)['"]/);
       if (match) {
         const [, name, module] = match;
-        return `const ${name} = require('${module}');`;
+        const convertedModule = convertModulePath(module);
+        return `const ${name} = require('${convertedModule}');`;
       }
     }
     return `// ${imp} // TODO: Convert this import manually`;
-  }).filter(imp => !imp.includes('TODO')); // Remove TODO comments for cleaner output
+  }).filter(imp => !imp.includes('TODO') && !imp.includes('TypeScript type import')); // Remove TODO and type imports
+}
+
+// Convert Next.js path aliases to relative paths for Netlify functions
+function convertModulePath(modulePath) {
+  // Convert @/lib/... to relative paths from netlify/functions/
+  if (modulePath.startsWith('@/lib/')) {
+    return '../../lib/' + modulePath.substring(6);
+  }
+
+  // Convert @/... to relative paths from netlify/functions/
+  if (modulePath.startsWith('@/')) {
+    return '../../' + modulePath.substring(2);
+  }
+
+  // Keep other module paths as-is (npm packages, etc.)
+  return modulePath;
 }
 
 // Extract export functions with improved parsing
@@ -429,37 +452,27 @@ ${Object.keys(exports).map(method => `exports.${method.toLowerCase()} = ${method
 function writeNetlifyFunction(func) {
   const filePath = path.join(NETLIFY_FUNCTIONS_DIR, `${func.name}.js`);
 
-  // Check if this would overwrite a manually created function
+  // Check if this would overwrite a manually created function (non-API functions)
   if (fs.existsSync(filePath) && isManuallyCreatedFunction(`${func.name}.js`)) {
     log(`⚠️  Skipped: ${func.name}.js (manually created function preserved)`, 'yellow');
     return false;
   }
 
+  // For API functions (api-* prefix), always overwrite to update them
+  const isExistingApiFunction = fs.existsSync(filePath) && func.name.startsWith(GENERATED_PREFIX);
+
   fs.writeFileSync(filePath, func.content);
-  log(`✅ Generated: ${func.name}.js (${func.originalRoute})`, 'green');
+
+  if (isExistingApiFunction) {
+    log(`🔄 Updated: ${func.name}.js (${func.originalRoute})`, 'cyan');
+  } else {
+    log(`✅ Created: ${func.name}.js (${func.originalRoute})`, 'green');
+  }
+
   return true;
 }
 
-// Clean up old generated functions (only API route conversions)
-function cleanupOldFunctions() {
-  if (!fs.existsSync(NETLIFY_FUNCTIONS_DIR)) return;
 
-  const files = fs.readdirSync(NETLIFY_FUNCTIONS_DIR);
-
-  // Only remove files that start with our API generation prefix
-  // This preserves manually created functions like auth.js, compile-stream.js, etc.
-  const generatedFiles = files.filter(file =>
-    file.startsWith(GENERATED_PREFIX) &&
-    file.endsWith('.js') &&
-    !isManuallyCreatedFunction(file)
-  );
-
-  generatedFiles.forEach(file => {
-    const filePath = path.join(NETLIFY_FUNCTIONS_DIR, file);
-    fs.unlinkSync(filePath);
-    log(`🗑️  Removed old generated API function: ${file}`, 'yellow');
-  });
-}
 
 // Check if a function was manually created (not auto-generated from API routes)
 function isManuallyCreatedFunction(filename) {
@@ -489,9 +502,8 @@ async function migrateApiRoutes(options = {}) {
   try {
     // Ensure directories exist
     ensureNetlifyFunctionsDir();
-    
-    // Clean up old generated functions
-    cleanupOldFunctions();
+
+    // Note: We don't clean up functions here - we'll replace/create as needed
     
     // Get all API routes
     let routes = getApiRoutes(API_ROUTES_DIR);

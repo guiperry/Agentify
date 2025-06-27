@@ -69,7 +69,7 @@ jobs:
       run: |
         cd /tmp/build-${{ inputs.job_id }}
 
-        # Create main.go from template
+        # Create main.go from template (ensure no unused imports)
         cat > main.go << 'EOF'
         package main
 
@@ -85,6 +85,12 @@ jobs:
             fmt.Printf("Platform: %s\n", os.Getenv("PLATFORM"))
         }
         EOF
+
+        # Verify the generated main.go
+        echo "Generated main.go:"
+        cat main.go
+        echo "Checking for unused imports..."
+        go vet .
 
         # Create go.mod
         cat > go.mod << 'EOF'
