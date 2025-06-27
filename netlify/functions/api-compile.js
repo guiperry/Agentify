@@ -1,10 +1,10 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/compile
-// Generated: 2025-06-27T20:26:18.643Z
+// Generated: 2025-06-27T20:51:18.011Z
 
 // NextResponse/NextRequest converted to native Netlify response format
-const { createAgentCompilerService } = require('../../src/lib/compiler/agent-compiler-interface.js');
-const { sendCompilationUpdate } = require('../../src/lib/websocket-utils.js');
+const { createAgentCompilerService } = require('./lib/agent-compiler-interface.js');
+const { sendCompilationUpdate } = require('./lib/websocket-utils.js');
 const { createGitHubActionsCompiler } = require('./lib/github-actions-compiler.js');
 
 // CORS headers for all responses

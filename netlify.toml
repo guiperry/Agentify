@@ -1,7 +1,7 @@
 [build]
-  # Build command that ensures toolchain and directories exist before Next.js build
+  # Build command for Netlify - skip toolchain installation since we use GitHub Actions for compilation
   # Force clean install to avoid cache issues
-  command = "npm ci && npm run install-toolchain && npm run build"
+  command = "npm ci && npm run build"
 
   # Publish directory for Next.js on Netlify
   # For Next.js with API routes, this should be omitted to let the plugin handle it
@@ -28,10 +28,10 @@
   # WebSocket Configuration (disabled for serverless deployment)
   NEXT_PUBLIC_ENABLE_WEBSOCKET = "false"
 
-  # Go version and configuration
-  GO_VERSION = "1.21"
-  GOROOT = "/usr/local/go"
-  GOPATH = "/opt/buildhome/go"
+  # Go compilation disabled for Netlify - using GitHub Actions instead
+  # GO_VERSION = "1.21"
+  # GOROOT = "/usr/local/go"
+  # GOPATH = "/opt/buildhome/go"
 
   # Python version (for future use)
   PYTHON_VERSION = "3.11"
@@ -90,10 +90,10 @@
 
 # Build hooks for different branches
 [context.production]
-  command = "npm ci && npm run install-toolchain && npm run build"
+  command = "npm ci && npm run build"
 
 [context.deploy-preview]
-  command = "npm ci && npm run install-toolchain && npm run build"
+  command = "npm ci && npm run build"
 
 [context.branch-deploy]
-  command = "npm ci && npm run install-toolchain && npm run build"
+  command = "npm ci && npm run build"

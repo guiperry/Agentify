@@ -156,6 +156,17 @@ function extractImports(content) {
 
 // Convert Next.js path aliases to relative paths for Netlify functions
 function convertModulePath(modulePath) {
+  // Special cases for modules that have Netlify-specific implementations
+  if (modulePath === '@/lib/github-actions-compiler') {
+    return './lib/github-actions-compiler.js';
+  }
+  if (modulePath === '@/lib/compiler/agent-compiler-interface') {
+    return './lib/agent-compiler-interface.js';
+  }
+  if (modulePath === '@/lib/websocket-utils') {
+    return './lib/websocket-utils.js';
+  }
+
   // Convert @/lib/... to relative paths from netlify/functions/ to src/lib/
   if (modulePath.startsWith('@/lib/')) {
     const relativePath = '../../src/lib/' + modulePath.substring(6);
