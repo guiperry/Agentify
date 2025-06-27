@@ -91,18 +91,18 @@ export function useSSE(options: UseSSEOptions = {}) {
 
   // Auto-connect on mount when user is authenticated
   useEffect(() => {
-    if (autoConnect && user?.access_token) {
-      sseManager.current.connect(user.access_token);
+    if (autoConnect && user?.accessToken) {
+      sseManager.current.connect(user.accessToken);
     }
 
     return () => {
       sseManager.current.cleanup();
     };
-  }, [autoConnect, user?.access_token]);
+  }, [autoConnect, user?.accessToken]);
 
   const connect = useCallback(() => {
-    sseManager.current.connect(user?.access_token);
-  }, [user?.access_token]);
+    sseManager.current.connect(user?.accessToken);
+  }, [user?.accessToken]);
 
   const disconnect = useCallback(() => {
     sseManager.current.disconnect();

@@ -81,7 +81,6 @@ export async function POST(request: Request) {
     // Try local compilation first
     let pluginPath: string;
     let compilationLogs: string[];
-    let isGitHubActionsUsed = false;
 
     try {
       // Attempt local compilation
@@ -90,39 +89,16 @@ export async function POST(request: Request) {
       compilationLogs = compilerService.getCompilationLogs();
       await sendCompilationUpdate('compilation', 90, 'Local compilation completed successfully');
     } catch (localError) {
-      console.log('Local compilation failed, trying GitHub Actions fallback:', localError);
-      await sendCompilationUpdate('compilation', 60, 'Local compilation failed, using GitHub Actions fallback...');
+      console.log('Local compilation failed:', localError);
+      await sendCompilationUpdate('compilation', 60, 'Local compilation failed. GitHub Actions fallback coming soon...');
 
-      // Try GitHub Actions fallback
-      const githubCompiler = createGitHubActionsCompiler();
-      if (!githubCompiler) {
-        throw new Error('Both local compilation and GitHub Actions fallback are unavailable');
-      }
-
-      try {
-        await sendCompilationUpdate('compilation', 70, 'Triggering GitHub Actions compilation...');
-        const jobId = await githubCompiler.triggerCompilation(pluginConfig);
-
-        await sendCompilationUpdate('compilation', 80, 'Waiting for GitHub Actions compilation to complete...');
-        const result = await githubCompiler.waitForCompletion(jobId, 300000); // 5 minutes timeout
-
-        if (result.status !== 'completed') {
-          throw new Error(result.error || 'GitHub Actions compilation failed');
-        }
-
-        // For GitHub Actions, we'll return a different response format
-        isGitHubActionsUsed = true;
-        pluginPath = result.downloadUrl || '';
-        compilationLogs = ['GitHub Actions compilation completed successfully'];
-        await sendCompilationUpdate('compilation', 100, 'GitHub Actions compilation completed');
-      } catch (githubError) {
-        throw new Error(`All compilation methods failed. Local: ${localError instanceof Error ? localError.message : String(localError)}. GitHub Actions: ${githubError instanceof Error ? githubError.message : String(githubError)}`);
-      }
+      // For now, return a helpful error message
+      throw new Error(`Compilation failed: ${localError instanceof Error ? localError.message : String(localError)}. GitHub Actions fallback will be available soon - please try again later or contact support.`);
     }
 
     // Extract filename from the plugin path for download URL
-    const filename = isGitHubActionsUsed ? `github-actions-${Date.now()}.zip` : (pluginPath.split('/').pop() || '');
-    const downloadUrl = isGitHubActionsUsed ? pluginPath : `/api/download/plugin/${filename}`;
+    const filename = pluginPath.split('/').pop() || '';
+    const downloadUrl = `/api/download/plugin/${filename}`;
 
     // Return success response
     return NextResponse.json({
@@ -131,8 +107,8 @@ export async function POST(request: Request) {
       downloadUrl,
       filename,
       logs: compilationLogs,
-      message: isGitHubActionsUsed ? 'Agent compiled successfully via GitHub Actions' : 'Agent compiled successfully',
-      compilationMethod: isGitHubActionsUsed ? 'github-actions' : 'local'
+      message: 'Agent compiled successfully',
+      compilationMethod: 'local'
     });
   } catch (error) {
     console.error('Compilation error:', error);
