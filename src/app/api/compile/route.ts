@@ -120,29 +120,20 @@ export async function POST(request: Request) {
         const jobId = await githubCompiler.triggerCompilation(pluginConfig);
 
         await sendCompilationUpdate('compilation', 80, 'GitHub Actions compilation started. Check GitHub Actions tab for progress...');
-        const result = await githubCompiler.waitForCompletion(jobId, 60000); // 1 minute timeout
 
-        if (result.status === 'completed') {
-          // For GitHub Actions, we'll return a different response format
-          pluginPath = result.downloadUrl || '';
-          compilationLogs = ['GitHub Actions compilation completed successfully'];
-          await sendCompilationUpdate('compilation', 100, 'GitHub Actions compilation completed');
-        } else if (result.status === 'failed') {
-          throw new Error(result.error || 'GitHub Actions compilation failed');
-        } else {
-          // Still in progress - return a partial success with instructions
-          await sendCompilationUpdate('compilation', 90, 'GitHub Actions compilation in progress. Check GitHub Actions tab for status.');
-          return NextResponse.json({
-            success: true,
-            message: 'Compilation started via GitHub Actions. Check the GitHub Actions tab in your repository for progress and download the artifact when complete.',
-            compilationMethod: 'github-actions',
-            status: 'in_progress',
-            jobId: jobId,
-            githubActionsUrl: `https://github.com/${process.env.GITHUB_OWNER}/${process.env.GITHUB_REPO}/actions`
-          });
-        }
+        // Don't wait for completion - return immediately with job ID for polling
+        console.log('🚀 GitHub Actions compilation started with job ID:', jobId);
+        return NextResponse.json({
+          success: true,
+          message: 'Compilation started via GitHub Actions. Check the GitHub Actions tab in your repository for progress and download the artifact when complete.',
+          compilationMethod: 'github-actions',
+          status: 'in_progress',
+          jobId: jobId,
+          githubActionsUrl: `https://github.com/${process.env.GITHUB_OWNER || 'guiperry'}/${process.env.GITHUB_REPO || 'next-agentify'}/actions`
+        });
       } catch (githubError) {
-        throw new Error(`All compilation methods failed. Local: ${localError instanceof Error ? localError.message : String(localError)}. GitHub Actions: ${githubError instanceof Error ? githubError.message : String(githubError)}`);
+        console.error('GitHub Actions compilation failed:', githubError);
+        throw new Error(`GitHub Actions compilation failed: ${githubError instanceof Error ? githubError.message : String(githubError)}`);
       }
     }
 

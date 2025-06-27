@@ -99,6 +99,7 @@ export interface CompilerResult {
   filename?: string;
   message: string;
   logs?: string[];
+  compilationMethod?: string;
 }
 
 interface CompilerPanelProps {
@@ -148,6 +149,123 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
       });
   }, [addLogEntry]);
 
+  // Function to poll GitHub Actions compilation status
+  const pollGitHubActionsCompletion = async (jobId: string) => {
+    const maxAttempts = 60; // 5 minutes with 5-second intervals
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      try {
+        addLogEntry(`Checking compilation status... (${attempts + 1}/${maxAttempts})`);
+
+        const statusResponse = await fetch(`/api/compile/status?jobId=${encodeURIComponent(jobId)}`);
+        const statusResult = await statusResponse.json();
+
+        if (!statusResponse.ok) {
+          throw new Error(statusResult.message || 'Failed to check compilation status');
+        }
+
+        if (statusResult.status === 'completed') {
+          // Compilation completed successfully
+          addLogEntry("GitHub Actions compilation completed successfully!");
+          if (statusResult.downloadUrl) {
+            addLogEntry(`Download URL: ${statusResult.downloadUrl}`);
+          }
+
+          setCompileProgress(100);
+          setCompileStatus('success');
+          setCompileResult({
+            success: true,
+            message: 'GitHub Actions compilation completed successfully',
+            compilationMethod: 'github-actions',
+            downloadUrl: statusResult.downloadUrl,
+            logs: statusResult.logs || []
+          });
+
+          // Notify parent component
+          onCompileComplete({
+            success: true,
+            message: 'GitHub Actions compilation completed successfully',
+            compilationMethod: 'github-actions',
+            downloadUrl: statusResult.downloadUrl
+          });
+
+          // Show success toast
+          toast({
+            title: "Compilation Successful",
+            description: "GitHub Actions compilation completed successfully",
+            variant: "default",
+          });
+
+          return; // Exit polling loop
+        } else if (statusResult.status === 'failed') {
+          // Compilation failed
+          throw new Error(statusResult.error || 'GitHub Actions compilation failed');
+        } else {
+          // Still in progress, continue polling
+          addLogEntry(`Status: ${statusResult.status || 'in_progress'}`);
+          setCompileProgress(Math.min(80 + (attempts * 2), 95)); // Gradually increase progress
+        }
+
+        // Wait 5 seconds before next poll
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        attempts++;
+
+      } catch (error) {
+        console.error('Polling error:', error);
+        addLogEntry(`Polling error: ${error instanceof Error ? error.message : String(error)}`);
+
+        // If it's a network error, continue polling (might be temporary)
+        if (attempts < maxAttempts - 1) {
+          addLogEntry("Retrying in 5 seconds...");
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          attempts++;
+          continue;
+        } else {
+          // Max attempts reached, treat as failure
+          setCompileStatus('error');
+          setCompileResult({
+            success: false,
+            message: `GitHub Actions compilation polling failed: ${error instanceof Error ? error.message : String(error)}`
+          });
+
+          onCompileComplete({
+            success: false,
+            message: `GitHub Actions compilation polling failed: ${error instanceof Error ? error.message : String(error)}`
+          });
+
+          toast({
+            title: "Compilation Failed",
+            description: "Failed to monitor GitHub Actions compilation",
+            variant: "destructive",
+          });
+
+          return;
+        }
+      }
+    }
+
+    // Timeout reached
+    addLogEntry("Polling timeout reached. Compilation may still be in progress.");
+    addLogEntry("Check the GitHub Actions tab for the latest status.");
+
+    setCompileStatus('error');
+    setCompileResult({
+      success: false,
+      message: 'GitHub Actions compilation monitoring timed out. Check GitHub Actions tab for status.'
+    });
+
+    onCompileComplete({
+      success: false,
+      message: 'GitHub Actions compilation monitoring timed out. Check GitHub Actions tab for status.'
+    });
+
+    toast({
+      title: "Monitoring Timeout",
+      description: "Compilation monitoring timed out. Check GitHub Actions tab for status.",
+      variant: "destructive",
+    });
+  };
 
   const handleCompile = async () => {
     setIsCompiling(true);
@@ -254,41 +372,52 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
           throw new Error(result.message || 'Failed to compile agent');
         }
         
-        setCompileResult(result);
-        setCompileStatus(result.success ? 'success' : 'error');
-        setCompileProgress(100);
-      
-        // Add logs from the server if available
-        if (result.logs && Array.isArray(result.logs)) {
-          result.logs.forEach((log: string) => {
-            addLogEntry(log);
-          });
+        // Check if this is a GitHub Actions compilation that needs polling
+        if (result.compilationMethod === 'github-actions' && result.status === 'in_progress' && result.jobId) {
+          addLogEntry("GitHub Actions compilation started. Polling for completion...");
+          addLogEntry(`Job ID: ${result.jobId}`);
+          addLogEntry(`Monitor progress: ${result.githubActionsUrl}`);
+
+          // Start polling for completion
+          await pollGitHubActionsCompletion(result.jobId);
         } else {
-          // Add final log entries if no server logs
-          if (result.success) {
-            addLogEntry(`Plugin created at: ${result.pluginPath}`);
-            addLogEntry("Cleaning up temporary files...");
-            addLogEntry("Compilation process completed successfully!");
+          // Local compilation completed immediately or GitHub Actions returned final result
+          setCompileResult(result);
+          setCompileStatus(result.success ? 'success' : 'error');
+          setCompileProgress(100);
+
+          // Add logs from the server if available
+          if (result.logs && Array.isArray(result.logs)) {
+            result.logs.forEach((log: string) => {
+              addLogEntry(log);
+            });
           } else {
-            addLogEntry(`Error: ${result.message}`);
+            // Add final log entries if no server logs
+            if (result.success) {
+              addLogEntry(`Plugin created at: ${result.pluginPath}`);
+              addLogEntry("Cleaning up temporary files...");
+              addLogEntry("Compilation process completed successfully!");
+            } else {
+              addLogEntry(`Error: ${result.message}`);
+            }
           }
+
+          // Add download link if plugin was created
+          if (result.success && result.downloadUrl) {
+            addLogEntry(`Plugin ready for download: ${result.filename}`);
+            addLogEntry(`Download URL: ${result.downloadUrl}`);
+          }
+
+          // Notify parent component
+          onCompileComplete(result);
+
+          // Show toast notification
+          toast({
+            title: result.success ? "Compilation Successful" : "Compilation Failed",
+            description: result.message,
+            variant: result.success ? "default" : "destructive",
+          });
         }
-        
-        // Add download link if plugin was created
-        if (result.success && result.downloadUrl) {
-          addLogEntry(`Plugin ready for download: ${result.filename}`);
-          addLogEntry(`Download URL: ${result.downloadUrl}`);
-        }
-        
-        // Notify parent component
-        onCompileComplete(result);
-        
-        // Show toast notification
-        toast({
-          title: result.success ? "Compilation Successful" : "Compilation Failed",
-          description: result.message,
-          variant: result.success ? "default" : "destructive",
-        });
       } catch (error) {
         clearProgressOnError();
         console.error("Compilation error:", error);
