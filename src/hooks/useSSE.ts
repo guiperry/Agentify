@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { SSEManager } from '../utils/SSEManager';
 import type { CompilationUpdate, DeploymentUpdate, SSEMessage } from '../utils/SSEManager';
+import { useAuth } from '../contexts/AuthContext';
 
 interface UseSSEOptions {
   onCompilationUpdate?: (update: CompilationUpdate) => void;
@@ -19,6 +20,7 @@ export function useSSE(options: UseSSEOptions = {}) {
     autoConnect = true
   } = options;
 
+  const { user } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const sseManager = useRef<SSEManager>(SSEManager.getInstance());
@@ -87,20 +89,20 @@ export function useSSE(options: UseSSEOptions = {}) {
     };
   }, []);
 
-  // Auto-connect on mount
+  // Auto-connect on mount when user is authenticated
   useEffect(() => {
-    if (autoConnect) {
-      sseManager.current.connect();
+    if (autoConnect && user?.access_token) {
+      sseManager.current.connect(user.access_token);
     }
 
     return () => {
       sseManager.current.cleanup();
     };
-  }, [autoConnect]);
+  }, [autoConnect, user?.access_token]);
 
   const connect = useCallback(() => {
-    sseManager.current.connect();
-  }, []);
+    sseManager.current.connect(user?.access_token);
+  }, [user?.access_token]);
 
   const disconnect = useCallback(() => {
     sseManager.current.disconnect();

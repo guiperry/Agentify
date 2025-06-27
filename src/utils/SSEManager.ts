@@ -69,12 +69,13 @@ export class SSEManager {
     });
   }
 
-  connect() {
+  connect(authToken?: string) {
     if (!this.isBrowser) return;
     if (this.isConnecting) return;
     if (this.sseClient) return;
 
-    const sseUrl = process.env.NEXT_PUBLIC_SSE_URL || '/.netlify/functions/stream';
+    const baseUrl = process.env.NEXT_PUBLIC_SSE_URL || '/.netlify/functions/stream';
+    const sseUrl = authToken ? `${baseUrl}?token=${authToken}` : baseUrl;
 
     try {
       this.isConnecting = true;
