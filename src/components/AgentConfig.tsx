@@ -344,9 +344,14 @@ const AgentConfig = ({
     localStorage.setItem('agentify-config-progress', JSON.stringify(progressData));
   }, [agentName, personality, instructions, creativity, features, agentFacts, mcpServers, apiKeys, activeTab, configProcessComplete]);
 
-  // Clear saved progress when agent is successfully minted
+  // Clear saved progress when agent is successfully minted or when user clicks Clear Progress
   const clearSavedProgress = () => {
+    // Clear the main configuration progress
     localStorage.removeItem('agentify-config-progress');
+    
+    // Also clear any compilation state that might be stored
+    const agentId = agentName.replace(/\s+/g, '-').toLowerCase();
+    localStorage.removeItem(`compilation-state-${agentId}`);
   };
 
   // Export configuration
@@ -549,8 +554,8 @@ const AgentConfig = ({
             description: "GitHub Actions compilation completed successfully!",
           });
 
-          // Set isCompiling to false since compilation is complete
-          setIsCompiling(false);
+          // Keep isCompiling true to keep the button disabled after successful compilation
+          // Don't reset isCompiling here
           return; // Exit polling loop
         } else if (statusResult.status === 'failed') {
           // Compilation failed
@@ -605,7 +610,14 @@ const AgentConfig = ({
   };
 
   const handleCompile = async () => {
-    console.log("🚀 AgentConfig handleCompile called, current isCompiling:", isCompiling);
+    console.log("🚀 AgentConfig handleCompile called, current isCompiling:", isCompiling, "compileStatus:", compileStatus);
+    
+    // Prevent recompilation if already successfully compiled
+    if (compileStatus === 'success') {
+      console.log("🚀 AgentConfig handleCompile: Compilation already successful, not triggering again");
+      return;
+    }
+    
     setIsCompiling(true);
     setCompileStatus('compiling');
     console.log("🚀 AgentConfig set isCompiling to true and compileStatus to 'compiling'");
@@ -1074,6 +1086,7 @@ const AgentConfig = ({
           </Button>
           <Button
             onClick={() => {
+              // Clear all saved progress including configuration and compilation state
               clearSavedProgress();
               window.location.reload();
             }}
@@ -1674,9 +1687,16 @@ const AgentConfig = ({
                   console.log("🎯 Compilation success:", result.success);
                   console.log("🎯 Compilation message:", result.message);
 
-                  // Reset main compile button state
-                  console.log("🎯 AgentConfig onCompileComplete - setting isCompiling to false");
-                  setIsCompiling(false);
+                  // Only reset the compiling state if compilation failed
+                  // Keep the button disabled after successful compilation
+                  if (!result.success) {
+                    console.log("🎯 AgentConfig onCompileComplete - compilation failed, setting isCompiling to false");
+                    setIsCompiling(false);
+                  } else {
+                    console.log("🎯 AgentConfig onCompileComplete - compilation successful, keeping isCompiling true");
+                    // Keep isCompiling true to keep the button disabled
+                  }
+                  
                   setCompileStatus(result.success ? 'success' : 'error');
 
                   // Store compilation data for deployment
@@ -1769,14 +1789,21 @@ const AgentConfig = ({
                 className={`${
                   agentRegistered && !isCompiling
                     ? 'bg-purple-600 hover:bg-purple-700 text-white'
-                    : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                    : isCompiling && compileStatus === 'success'
+                      ? 'bg-green-600 text-white cursor-not-allowed'
+                      : 'bg-gray-600 text-gray-400 cursor-not-allowed'
                 }`}
                 size="lg"
               >
-                {isCompiling ? (
+                {isCompiling && compileStatus === 'compiling' ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Compiling...
+                  </>
+                ) : isCompiling && compileStatus === 'success' ? (
+                  <>
+                    <CheckCircle className="mr-2 h-4 w-4 text-green-400" />
+                    Compile Complete
                   </>
                 ) : (
                   <>

@@ -184,58 +184,8 @@ const AgentDeployer = ({
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Cloud Deployment */}
-        <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center">
-              <Cloud className="h-5 w-5 mr-2 text-purple-400" />
-              Cloud Deploy
-            </CardTitle>
-            <CardDescription className="text-white/70">
-              Deploy your agent to cloud platforms for global access
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Button
-                onClick={() => handleDeploy('staging')}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                <Cloud className="h-4 w-4 mr-2" />
-                Deploy to Staging
-              </Button>
-              <Button
-                onClick={() => handleDeploy('production')}
-                className="bg-purple-600 hover:bg-purple-700 text-white"
-              >
-                <Rocket className="h-4 w-4 mr-2" />
-                Deploy to Production
-              </Button>
-            </div>
-
-            {/* Success Message */}
-            {isDeploymentComplete && (
-              <div className="bg-green-600/20 border border-green-500/30 rounded-lg p-4">
-                <div className="flex items-center space-x-2">
-                  <div className="w-4 h-4 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-green-400 font-medium">
-                    Deployment successful! Redirecting to dashboard...
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <DeploymentPanel
-              repoUrl={connectedApp.url}
-              agentConfig={agentConfig}
-              onDeployComplete={() => handleDeploy('production')}
-              compiledPluginUrl={compiledPluginUrl}
-              compilationJobId={compilationJobId}
-            />
-          </CardContent>
-        </Card>
-
+      {/* Top row with Local Deploy and Blockchain Deploy */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
         {/* Local Deployment */}
         <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
           <CardHeader>
@@ -317,6 +267,60 @@ const AgentDeployer = ({
             <BlockchainDeploymentPanel
               agentConfig={agentConfig}
               onDeployComplete={() => setIsDeploymentComplete(true)}
+              compiledPluginUrl={compiledPluginUrl}
+              compilationJobId={compilationJobId}
+            />
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Bottom row with Cloud Deploy (full width) */}
+      <div className="grid grid-cols-1 gap-8">
+        {/* Cloud Deployment */}
+        <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
+          <CardHeader>
+            <CardTitle className="text-white flex items-center">
+              <Cloud className="h-5 w-5 mr-2 text-purple-400" />
+              Cloud Deploy
+            </CardTitle>
+            <CardDescription className="text-white/70">
+              Deploy your agent to cloud platforms for global access
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Button
+                onClick={() => handleDeploy('staging')}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Cloud className="h-4 w-4 mr-2" />
+                Deploy to Staging
+              </Button>
+              <Button
+                onClick={() => handleDeploy('production')}
+                className="bg-purple-600 hover:bg-purple-700 text-white"
+              >
+                <Rocket className="h-4 w-4 mr-2" />
+                Deploy to Production
+              </Button>
+            </div>
+
+            {/* Success Message */}
+            {isDeploymentComplete && (
+              <div className="bg-green-600/20 border border-green-500/30 rounded-lg p-4">
+                <div className="flex items-center space-x-2">
+                  <div className="w-4 h-4 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-green-400 font-medium">
+                    Deployment successful! Redirecting to dashboard...
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <DeploymentPanel
+              repoUrl={connectedApp.url}
+              agentConfig={agentConfig}
+              onDeployComplete={() => handleDeploy('production')}
               compiledPluginUrl={compiledPluginUrl}
               compilationJobId={compilationJobId}
             />

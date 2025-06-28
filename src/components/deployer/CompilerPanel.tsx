@@ -103,6 +103,9 @@ export interface CompilerResult {
   jobId?: string;
 }
 
+// Define the compile status type
+export type CompileStatusType = 'idle' | 'compiling' | 'success' | 'error';
+
 interface CompilerPanelProps {
   agentConfig: AgentConfig;
   onCompileComplete: (result: CompilerResult) => void;
@@ -120,7 +123,7 @@ const CompilerPanel = ({
 }: CompilerPanelProps): React.ReactElement => {
   const [compileProgress, setCompileProgress] = useState(0);
   const [isCompiling, setIsCompiling] = useState(false);
-  const [compileStatus, setCompileStatus] = useState<'idle' | 'compiling' | 'success' | 'error'>('idle');
+  const [compileStatus, setCompileStatus] = useState<CompileStatusType>('idle');
   const [compileResult, setCompileResult] = useState<CompilerResult | null>(null);
   const [selectedPlatform, setSelectedPlatform] = useState<'windows' | 'linux' | 'mac'>('linux');
   const [advancedSettings, setAdvancedSettings] = useState({
@@ -144,6 +147,12 @@ const CompilerPanel = ({
     const timestamp = new Date().toLocaleTimeString();
     setCompileLog(prev => [...prev, { message, timestamp }]);
   }, []);
+  
+  // Helper function to clear compilation state from localStorage
+  const clearCompilationState = useCallback(() => {
+    const agentId = agentConfig.name.replace(/\s+/g, '-').toLowerCase();
+    localStorage.removeItem(`compilation-state-${agentId}`);
+  }, [agentConfig.name]);
 
   // Auto-scroll to bottom when new logs are added
   useEffect(() => {
@@ -152,14 +161,63 @@ const CompilerPanel = ({
     }
   }, [compileLog]);
 
+  // Check for previously completed compilation on mount
+  useEffect(() => {
+    // Check if we have a stored compilation state for this agent
+    const agentId = agentConfig.name.replace(/\s+/g, '-').toLowerCase();
+    const storedCompilationState = localStorage.getItem(`compilation-state-${agentId}`);
+    
+    if (storedCompilationState) {
+      try {
+        const parsedState = JSON.parse(storedCompilationState);
+        if (parsedState.success) {
+          console.log("🎯 CompilerPanel: Found successful compilation in localStorage, restoring state");
+          setCompileStatus('success');
+          setIsCompiling(true); // Keep button disabled
+          if (parsedState.result) {
+            setCompileResult(parsedState.result);
+          }
+        }
+      } catch (e) {
+        console.error("Error parsing stored compilation state:", e);
+      }
+    }
+  }, [agentConfig.name]);
+
   // Watch for external trigger to start compilation
   useEffect(() => {
+    // Generate a unique ID for this agent to use in localStorage
+    const agentId = agentConfig.name.replace(/\s+/g, '-').toLowerCase();
+    
     console.log("🎯 CompilerPanel useEffect triggered:", {
       triggerCompile,
       lastTrigger: lastTriggerRef.current,
       isCompiling,
-      isCompilingRef: isCompilingRef.current
+      isCompilingRef: isCompilingRef.current,
+      compileStatus,
+      agentId
     });
+
+    // Check if we have a stored compilation state for this agent
+    const storedCompilationState = localStorage.getItem(`compilation-state-${agentId}`);
+    if (storedCompilationState) {
+      try {
+        const parsedState = JSON.parse(storedCompilationState);
+        if (parsedState.success) {
+          console.log("🎯 CompilerPanel: Found successful compilation in localStorage, not triggering again");
+          return;
+        }
+      } catch (e) {
+        console.error("Error parsing stored compilation state:", e);
+      }
+    }
+
+    // Add a check to prevent recompilation if we've already successfully compiled
+    // This prevents recompilation when navigating back to the compile tab
+    if (compileStatus === 'success') {
+      console.log("🎯 CompilerPanel: Compilation already successful, not triggering again");
+      return;
+    }
 
     if (triggerCompile &&
         triggerCompile > 0 &&
@@ -185,10 +243,11 @@ const CompilerPanel = ({
         notCompiling: !isCompiling,
         notCompilingRef: !isCompilingRef.current,
         compileStatus: compileStatus,
-        notCompilingStatus: compileStatus !== 'compiling'
+        notCompilingStatus: compileStatus !== 'compiling',
+        alreadySuccessful: compileStatus === 'success' as CompileStatusType
       });
     }
-  }, [triggerCompile, isCompiling, compileStatus]);
+  }, [triggerCompile, isCompiling, compileStatus, agentConfig.name]);
   
   // The frontend can indicate it's ready, but actual dependency checks
   // and service initialization happen on the backend.
@@ -261,15 +320,26 @@ const CompilerPanel = ({
             logs: statusResult.logs || []
           });
 
-          // Notify parent component
-          onCompileComplete({
+          // Store successful compilation state in localStorage
+          const compilationResult = {
             success: true,
             message: 'GitHub Actions compilation completed successfully',
             compilationMethod: 'github-actions',
             downloadUrl: statusResult.downloadUrl,
             filename: `agent-plugin-${jobId}.zip`,
             jobId: jobId
-          });
+          };
+          
+          // Store in localStorage to prevent recompilation when navigating back
+          const agentId = agentConfig.name.replace(/\s+/g, '-').toLowerCase();
+          localStorage.setItem(`compilation-state-${agentId}`, JSON.stringify({
+            success: true,
+            result: compilationResult,
+            timestamp: Date.now()
+          }));
+
+          // Notify parent component
+          onCompileComplete(compilationResult);
 
           // Show success toast
           toast({
@@ -278,8 +348,8 @@ const CompilerPanel = ({
             variant: "default",
           });
 
-          // Set isCompiling to false since compilation is complete
-          setIsCompiling(false);
+          // Keep isCompiling true to keep the button disabled after successful compilation
+          // Don't reset isCompiling here
           return; // Exit polling loop
         } else if (statusResult.status === 'failed') {
           // Compilation failed
@@ -311,6 +381,9 @@ const CompilerPanel = ({
             success: false,
             message: `GitHub Actions compilation polling failed: ${error instanceof Error ? error.message : String(error)}`
           });
+          
+          // Clear any stored compilation state since this is a failure
+          clearCompilationState();
 
           onCompileComplete({
             success: false,
@@ -340,6 +413,9 @@ const CompilerPanel = ({
       message: 'GitHub Actions compilation monitoring timed out. Check GitHub Actions tab for status.'
     });
 
+    // Clear any stored compilation state since this is a failure
+    clearCompilationState();
+    
     onCompileComplete({
       success: false,
       message: 'GitHub Actions compilation monitoring timed out. Check GitHub Actions tab for status.'
@@ -490,6 +566,9 @@ const CompilerPanel = ({
               message: `GitHub Actions polling failed: ${pollingError instanceof Error ? pollingError.message : String(pollingError)}`
             });
 
+            // Clear any stored compilation state since this is a failure
+            clearCompilationState();
+            
             // Notify parent component of failure
             onCompileComplete({
               success: false,
@@ -525,6 +604,16 @@ const CompilerPanel = ({
             addLogEntry(`Download URL: ${result.downloadUrl}`);
           }
 
+          // Store successful compilation state in localStorage if compilation was successful
+          if (result.success) {
+            const agentId = agentConfig.name.replace(/\s+/g, '-').toLowerCase();
+            localStorage.setItem(`compilation-state-${agentId}`, JSON.stringify({
+              success: true,
+              result: result,
+              timestamp: Date.now()
+            }));
+          }
+
           // Notify parent component
           onCompileComplete(result);
 
@@ -546,6 +635,9 @@ const CompilerPanel = ({
         // Add error log entry
         addLogEntry(`Fatal error: ${error instanceof Error ? error.message : String(error)}`);
         
+        // Clear any stored compilation state since this is a failure
+        clearCompilationState();
+        
         // Notify parent component
         onCompileComplete({
           success: false,
@@ -560,10 +652,22 @@ const CompilerPanel = ({
         });
       }
     } finally {
-      setIsCompiling(false);
-      isCompilingRef.current = false;
+      // Only reset the compiling state if compilation failed
+      // For successful compilations, we want to keep the button disabled
+      if (compileStatus === 'error') {
+        setIsCompiling(false);
+        isCompilingRef.current = false;
+      } else if (compileStatus === 'success') {
+        // Keep isCompiling true to keep the button disabled
+        // But reset isCompilingRef to allow future compilations if the page is refreshed
+        isCompilingRef.current = false;
+      } else {
+        // For any other status (like 'idle'), reset both
+        setIsCompiling(false);
+        isCompilingRef.current = false;
+      }
     }
-  }, [agentConfig, externalBuildTarget, selectedPlatform, advancedSettings, onCompileStart, onCompileComplete, addLogEntry, toast]);
+  }, [agentConfig, externalBuildTarget, selectedPlatform, advancedSettings, onCompileStart, onCompileComplete, addLogEntry, toast, clearCompilationState]);
 
   return (
     <div className="space-y-6">
