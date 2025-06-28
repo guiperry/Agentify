@@ -18,12 +18,12 @@ export async function GET(
     }
     
     // Ensure the file has a valid plugin extension
-    const validExtensions = ['.so', '.dll', '.dylib'];
+    const validExtensions = ['.so', '.dll', '.dylib', '.zip', '.wasm'];
     const hasValidExtension = validExtensions.some(ext => filename.endsWith(ext));
-    
+
     if (!hasValidExtension) {
       return NextResponse.json(
-        { error: 'Invalid file type. Only plugin files (.so, .dll, .dylib) are allowed.' },
+        { error: 'Invalid file type. Only plugin files (.so, .dll, .dylib, .zip, .wasm) are allowed.' },
         { status: 400 }
       );
     }
@@ -54,6 +54,10 @@ export async function GET(
         contentType = 'application/x-msdownload';
       } else if (filename.endsWith('.dylib')) {
         contentType = 'application/x-mach-binary';
+      } else if (filename.endsWith('.zip')) {
+        contentType = 'application/zip';
+      } else if (filename.endsWith('.wasm')) {
+        contentType = 'application/wasm';
       }
       
       // Create response with appropriate headers

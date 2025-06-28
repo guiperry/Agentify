@@ -154,21 +154,41 @@ const CompilerPanel = ({
 
   // Watch for external trigger to start compilation
   useEffect(() => {
+    console.log("🎯 CompilerPanel useEffect triggered:", {
+      triggerCompile,
+      lastTrigger: lastTriggerRef.current,
+      isCompiling,
+      isCompilingRef: isCompilingRef.current
+    });
+
     if (triggerCompile &&
         triggerCompile > 0 &&
         triggerCompile !== lastTriggerRef.current &&
         !isCompiling &&
-        !isCompilingRef.current) {
+        !isCompilingRef.current &&
+        compileStatus !== 'compiling') {
+
+      console.log("🎯 CompilerPanel conditions met, starting compilation");
 
       // Update the refs to prevent re-triggering
       lastTriggerRef.current = triggerCompile;
+      // Set isCompilingRef immediately to prevent race conditions
       isCompilingRef.current = true;
 
       // Automatically navigate to logs tab and start compilation
       setActiveTab("logs");
       handleCompile();
+    } else {
+      console.log("🎯 CompilerPanel conditions not met:", {
+        hasTrigger: triggerCompile && triggerCompile > 0,
+        isNewTrigger: triggerCompile !== lastTriggerRef.current,
+        notCompiling: !isCompiling,
+        notCompilingRef: !isCompilingRef.current,
+        compileStatus: compileStatus,
+        notCompilingStatus: compileStatus !== 'compiling'
+      });
     }
-  }, [triggerCompile]);
+  }, [triggerCompile, isCompiling, compileStatus]);
   
   // The frontend can indicate it's ready, but actual dependency checks
   // and service initialization happen on the backend.
@@ -336,25 +356,37 @@ const CompilerPanel = ({
   };
 
   const handleCompile = useCallback(async () => {
+    console.log("🎯 handleCompile called, isCompilingRef.current:", isCompilingRef.current);
+
     // Prevent multiple simultaneous compilations
-    if (isCompilingRef.current) {
+    if (isCompilingRef.current && isCompiling) {
+      console.log("🎯 handleCompile: Already compiling, returning early");
       return;
     }
 
-    isCompilingRef.current = true;
+    console.log("🎯 handleCompile: Setting up compilation state");
+    // isCompilingRef.current should already be set by the trigger useEffect
+    if (!isCompilingRef.current) {
+      isCompilingRef.current = true;
+    }
     setIsCompiling(true);
     setCompileStatus('compiling');
     setCompileProgress(0);
     setCompileLog([]);
 
+    console.log("🎯 handleCompile: State set, continuing with compilation");
+
     // Notify parent component that compilation has started
     if (onCompileStart) {
+      console.log("🎯 handleCompile: Calling onCompileStart");
       onCompileStart();
     }
 
     // Automatically navigate to compiler logs tab
+    console.log("🎯 handleCompile: Setting active tab to logs");
     setActiveTab("logs");
 
+    console.log("🎯 handleCompile: Entering try block");
     try {
       // Use external build target if provided, otherwise use selected platform
       const buildTarget = externalBuildTarget || (selectedPlatform === 'linux' ? 'wasm' : 'go');
@@ -414,11 +446,15 @@ const CompilerPanel = ({
         
         // Process the response
         const result = await response.json();
-        
+        console.log("🎯 CompilerPanel received API response:", result);
+        console.log("🎯 Compilation method:", result.compilationMethod);
+        console.log("🎯 Status:", result.status);
+        console.log("🎯 Job ID:", result.jobId);
+
         if (!response.ok) {
           throw new Error(result.message || 'Failed to compile agent');
         }
-        
+
         // Check if this is a GitHub Actions compilation that needs polling
         if (result.compilationMethod === 'github-actions' && result.status === 'in_progress' && result.jobId) {
           addLogEntry("🔄 GitHub Actions compilation started. Polling for completion...");

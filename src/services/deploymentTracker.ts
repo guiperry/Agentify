@@ -30,48 +30,49 @@ export interface WebhookPayload {
   timestamp: string;
 }
 
-// Import the WebSocket manager to avoid creating duplicate connections
-import { WebSocketManager } from '../hooks/useWebSocket';
+// Import the SSE manager for real-time updates
+import { SSEManager } from '../utils/SSEManager';
+import type { SSEMessage } from '../utils/SSEManager';
 
 class DeploymentTracker {
   private deployments = new Map<string, DeploymentStatus>();
   private listeners = new Set<(deployment: DeploymentStatus) => void>();
-  private wsManager: WebSocketManager | null = null;
-  private messageListener: ((message: any) => void) | null = null;
+  private sseManager: SSEManager | null = null;
+  private messageListener: ((message: SSEMessage) => void) | null = null;
 
   constructor() {
-    // Only initialize WebSocket if explicitly enabled and in browser environment
-    if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_ENABLE_WEBSOCKET === 'true') {
-      this.initializeWebSocket();
+    // Initialize SSE for real-time updates in browser environment
+    if (typeof window !== 'undefined') {
+      this.initializeSSE();
     } else {
-      console.log('WebSocket disabled or not in browser environment - using local deployment tracking only');
+      console.log('Not in browser environment - using local deployment tracking only');
     }
   }
 
-  private initializeWebSocket() {
+  private initializeSSE() {
     try {
-      // Use the singleton WebSocket manager instead of creating a new connection
-      this.wsManager = WebSocketManager.getInstance();
+      // Use the singleton SSE manager for real-time updates
+      this.sseManager = SSEManager.getInstance();
 
       // Create a message listener for deployment updates
-      this.messageListener = (message: any) => {
+      this.messageListener = (message: SSEMessage) => {
         if (message.type === 'deployment_update') {
-          // Extract deployment data from message (similar to compilation data extraction)
+          // Extract deployment data from SSE message
           const deploymentData = message.data || {
-            deploymentId: (message as any).deploymentId,
-            status: (message as any).status,
-            progress: (message as any).progress,
-            message: (message as any).message,
-            timestamp: (message as any).timestamp
+            deploymentId: message.data?.deploymentId,
+            status: message.data?.status,
+            progress: message.data?.progress,
+            message: message.data?.message,
+            timestamp: message.timestamp
           };
           this.handleWebhookUpdate(deploymentData);
         }
       };
 
-      this.wsManager.addListener(this.messageListener);
-      console.log('Deployment tracker connected to WebSocket manager');
+      this.sseManager.addListener(this.messageListener);
+      console.log('Deployment tracker connected to SSE manager');
     } catch (error) {
-      console.error('Failed to initialize WebSocket for deployment tracker:', error);
+      console.error('Failed to initialize SSE for deployment tracker:', error);
     }
   }
 
@@ -291,10 +292,10 @@ class DeploymentTracker {
   }
 
   disconnect() {
-    if (this.wsManager && this.messageListener) {
-      this.wsManager.removeListener(this.messageListener);
+    if (this.sseManager && this.messageListener) {
+      this.sseManager.removeListener(this.messageListener);
       this.messageListener = null;
-      this.wsManager = null;
+      this.sseManager = null;
     }
     this.listeners.clear();
   }

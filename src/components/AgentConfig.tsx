@@ -170,6 +170,11 @@ const AgentConfig = ({
   const [activeTab, setActiveTab] = useState('identity');
   const [triggerCompile, setTriggerCompile] = useState<number>(0);
 
+  // Debug: Track isCompiling changes
+  useEffect(() => {
+    console.log("🎯 AgentConfig isCompiling changed to:", isCompiling);
+  }, [isCompiling]);
+
   // Upload state
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -600,16 +605,17 @@ const AgentConfig = ({
   };
 
   const handleCompile = async () => {
-    console.log("🚀 AgentConfig handleCompile called");
+    console.log("🚀 AgentConfig handleCompile called, current isCompiling:", isCompiling);
     setIsCompiling(true);
     setCompileStatus('compiling');
+    console.log("🚀 AgentConfig set isCompiling to true and compileStatus to 'compiling'");
 
     // Navigate to compile tab first
     setActiveTab('compile');
 
     // Use a small delay to ensure the tab switch happens, then trigger the CompilerPanel compile
     setTimeout(() => {
-      console.log("🎯 Triggering CompilerPanel compilation");
+      console.log("🎯 Triggering CompilerPanel compilation, isCompiling should be true:", isCompiling);
       // The CompilerPanel will handle the actual compilation and navigation to logs tab
       setTriggerCompile(Date.now()); // This will trigger the CompilerPanel to start compilation
     }, 100);
@@ -1658,13 +1664,18 @@ const AgentConfig = ({
                 selectedBuildTarget={selectedBuildTarget}
                 onCompileStart={() => {
                   // This will be called when CompilerPanel starts compilation
+                  console.log("🎯 AgentConfig onCompileStart called - setting isCompiling to true");
                   setIsCompiling(true);
                   setCompileStatus('compiling');
                 }}
                 onCompileComplete={(result) => {
                   console.log("🎯 AgentConfig received compilation result:", result);
+                  console.log("🎯 Compilation method:", result.compilationMethod);
+                  console.log("🎯 Compilation success:", result.success);
+                  console.log("🎯 Compilation message:", result.message);
 
                   // Reset main compile button state
+                  console.log("🎯 AgentConfig onCompileComplete - setting isCompiling to false");
                   setIsCompiling(false);
                   setCompileStatus(result.success ? 'success' : 'error');
 
@@ -1750,7 +1761,10 @@ const AgentConfig = ({
                 </select>
               </div>
               <Button
-                onClick={handleCompile}
+                onClick={() => {
+                  console.log("🎯 Compile button clicked, agentRegistered:", agentRegistered, "isCompiling:", isCompiling);
+                  handleCompile();
+                }}
                 disabled={!agentRegistered || isCompiling}
                 className={`${
                   agentRegistered && !isCompiling
