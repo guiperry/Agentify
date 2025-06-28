@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/deploy
-// Generated: 2025-06-27T23:32:07.979Z
+// Generated: 2025-06-28T00:11:48.933Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 

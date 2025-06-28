@@ -168,6 +168,7 @@ const AgentConfig = ({
   const [selectedBuildTarget, setSelectedBuildTarget] = useState<'wasm' | 'go'>('wasm');
   const [agentRegistered, setAgentRegistered] = useState(false);
   const [activeTab, setActiveTab] = useState('identity');
+  const [triggerCompile, setTriggerCompile] = useState<number>(0);
 
   // Upload state
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -505,75 +506,114 @@ const AgentConfig = ({
     ));
   };
 
+  // Function to poll GitHub Actions compilation status
+  const pollGitHubActionsCompletion = async (jobId: string) => {
+    const maxAttempts = 60; // 5 minutes with 5-second intervals
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      try {
+        console.log(`🔍 Checking GitHub Actions compilation status... (${attempts + 1}/${maxAttempts})`);
+
+        const statusResponse = await fetch(`/api/compile/status?jobId=${encodeURIComponent(jobId)}`);
+        const statusResult = await statusResponse.json();
+
+        if (!statusResponse.ok) {
+          throw new Error(statusResult.message || 'Failed to check compilation status');
+        }
+
+        if (statusResult.status === 'completed') {
+          // Compilation completed successfully
+          console.log('🎉 GitHub Actions compilation completed successfully!');
+
+          setCompileStatus('success');
+          setCompilationComplete(true);
+          setCompletedTabs(prev => new Set(prev).add('compile'));
+
+          // Store compilation result
+          setCompilationResult({
+            success: true,
+            downloadUrl: statusResult.downloadUrl,
+            filename: `agent-plugin-${jobId}.zip`,
+            compilationMethod: 'github-actions',
+            jobId: jobId
+          });
+
+          toast({
+            title: "Compilation Successful",
+            description: "GitHub Actions compilation completed successfully!",
+          });
+
+          // Set isCompiling to false since compilation is complete
+          setIsCompiling(false);
+          return; // Exit polling loop
+        } else if (statusResult.status === 'failed') {
+          // Compilation failed
+          throw new Error(statusResult.error || 'GitHub Actions compilation failed');
+        } else {
+          // Still in progress, continue polling
+          console.log(`Status: ${statusResult.status || 'in_progress'}`);
+        }
+
+        // Wait 5 seconds before next poll
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        attempts++;
+
+      } catch (error) {
+        console.error('GitHub Actions polling error:', error);
+
+        // If it's a network error, continue polling (might be temporary)
+        if (attempts < maxAttempts - 1) {
+          console.log("Retrying in 5 seconds...");
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          attempts++;
+          continue;
+        } else {
+          // Max attempts reached, treat as failure
+          setCompileStatus('error');
+
+          toast({
+            title: "Compilation Failed",
+            description: "Failed to monitor GitHub Actions compilation",
+            variant: "destructive",
+          });
+
+          // Set isCompiling to false since compilation failed
+          setIsCompiling(false);
+          return;
+        }
+      }
+    }
+
+    // Timeout reached
+    console.log("GitHub Actions compilation monitoring timed out");
+    setCompileStatus('error');
+
+    toast({
+      title: "Monitoring Timeout",
+      description: "GitHub Actions compilation monitoring timed out. Check GitHub Actions tab for status.",
+      variant: "destructive",
+    });
+
+    // Set isCompiling to false since monitoring timed out
+    setIsCompiling(false);
+  };
+
   const handleCompile = async () => {
     setIsCompiling(true);
     setCompileStatus('compiling');
 
-    // Navigate to compiler logs tab when compilation starts
-    setActiveTab('compiler');
+    // Navigate to compile tab first
+    setActiveTab('compile');
 
-    try {
-      const agentConfig = {
-        name: agentName,
-        personality,
-        instructions,
-        features,
-        settings: {
-          mcpServers,
-          creativity: creativity[0]
-        }
-      };
+    // Use a small delay to ensure the tab switch happens, then trigger the CompilerPanel compile
+    setTimeout(() => {
+      // The CompilerPanel will handle the actual compilation and navigation to logs tab
+      setTriggerCompile(Date.now()); // This will trigger the CompilerPanel to start compilation
+    }, 100);
 
-      const payload = {
-        agentConfig,
-        buildTarget: selectedBuildTarget,
-        advancedSettings: {
-          isolationLevel: 'process',
-          memoryLimit: 512,
-          cpuCores: 1,
-          timeLimit: 60,
-          networkAccess: true,
-          fileSystemAccess: false,
-          useChromemGo: true,
-          subAgentCapabilities: false
-        }
-      };
-
-      const response = await fetch('/api/compile', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || 'Failed to compile agent');
-      }
-
-      setCompileStatus('success');
-      setCompilationComplete(true);
-      setCompletedTabs(prev => new Set(prev).add('compile'));
-
-      toast({
-        title: "Compilation Successful",
-        description: "Your agent has been compiled successfully!",
-      });
-
-    } catch (error) {
-      console.error("Compilation error:", error);
-      setCompileStatus('error');
-
-      toast({
-        title: "Compilation Failed",
-        description: error instanceof Error ? error.message : "Unknown compilation error",
-        variant: "destructive",
-      });
-    } finally {
-      setIsCompiling(false);
-    }
+    // The CompilerPanel will handle the actual compilation logic
+    // We just need to manage the main compile button state here
   };
 
   const processConfiguration = async () => {
@@ -1612,8 +1652,19 @@ const AgentConfig = ({
                     creativity: creativity[0]
                   }
                 }}
+                triggerCompile={triggerCompile}
+                selectedBuildTarget={selectedBuildTarget}
+                onCompileStart={() => {
+                  // This will be called when CompilerPanel starts compilation
+                  setIsCompiling(true);
+                  setCompileStatus('compiling');
+                }}
                 onCompileComplete={(result) => {
                   console.log("Compilation result:", result);
+
+                  // Reset main compile button state
+                  setIsCompiling(false);
+                  setCompileStatus(result.success ? 'success' : 'error');
 
                   // Store compilation data for deployment
                   setCompilationResult({
@@ -1654,6 +1705,13 @@ const AgentConfig = ({
                     toast({
                       title: "Configuration Complete!",
                       description: "Your agent has been compiled successfully. You can now mint your agent.",
+                    });
+                  } else {
+                    // Handle compilation failure
+                    toast({
+                      title: "Compilation Failed",
+                      description: result.message || "Compilation failed. Check the logs for details.",
+                      variant: "destructive",
                     });
                   }
                 }}
@@ -1713,8 +1771,21 @@ const AgentConfig = ({
               </Button>
             </div>
             {compileStatus === 'success' && (
-              <div className="text-green-400 text-sm">
-                ✅ Agent compiled successfully! Ready for deployment.
+              <div className="space-y-2">
+                <div className="text-green-400 text-sm">
+                  ✅ Agent compiled successfully! Ready for deployment.
+                </div>
+                {compilationResult?.downloadUrl && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="border-green-800 text-green-400 hover:bg-green-900/30"
+                    onClick={() => window.open(compilationResult.downloadUrl, '_blank')}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download Plugin ({compilationResult.filename})
+                  </Button>
+                )}
               </div>
             )}
             {compileStatus === 'error' && (

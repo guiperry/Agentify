@@ -106,9 +106,18 @@ export interface CompilerResult {
 interface CompilerPanelProps {
   agentConfig: AgentConfig;
   onCompileComplete: (result: CompilerResult) => void;
+  triggerCompile?: number;
+  selectedBuildTarget?: 'wasm' | 'go';
+  onCompileStart?: () => void;
 }
 
-const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): React.ReactElement => {
+const CompilerPanel = ({
+  agentConfig,
+  onCompileComplete,
+  triggerCompile,
+  selectedBuildTarget: externalBuildTarget,
+  onCompileStart
+}: CompilerPanelProps): React.ReactElement => {
   const [compileProgress, setCompileProgress] = useState(0);
   const [isCompiling, setIsCompiling] = useState(false);
   const [compileStatus, setCompileStatus] = useState<'idle' | 'compiling' | 'success' | 'error'>('idle');
@@ -127,6 +136,8 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
   const [compileLog, setCompileLog] = useState<{message: string, timestamp: string}[]>([]);
   const [activeTab, setActiveTab] = useState("basic");
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const lastTriggerRef = useRef<number>(0);
+  const isCompilingRef = useRef<boolean>(false);
   const { toast } = useToast();
 
   const addLogEntry = useCallback((message: string) => {
@@ -140,6 +151,24 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [compileLog]);
+
+  // Watch for external trigger to start compilation
+  useEffect(() => {
+    if (triggerCompile &&
+        triggerCompile > 0 &&
+        triggerCompile !== lastTriggerRef.current &&
+        !isCompiling &&
+        !isCompilingRef.current) {
+
+      // Update the refs to prevent re-triggering
+      lastTriggerRef.current = triggerCompile;
+      isCompilingRef.current = true;
+
+      // Automatically navigate to logs tab and start compilation
+      setActiveTab("logs");
+      handleCompile();
+    }
+  }, [triggerCompile]);
   
   // The frontend can indicate it's ready, but actual dependency checks
   // and service initialization happen on the backend.
@@ -296,18 +325,33 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
     setIsCompiling(false);
   };
 
-  const handleCompile = async () => {
+  const handleCompile = useCallback(async () => {
+    // Prevent multiple simultaneous compilations
+    if (isCompilingRef.current) {
+      return;
+    }
+
+    isCompilingRef.current = true;
     setIsCompiling(true);
     setCompileStatus('compiling');
     setCompileProgress(0);
     setCompileLog([]);
 
+    // Notify parent component that compilation has started
+    if (onCompileStart) {
+      onCompileStart();
+    }
+
     // Automatically navigate to compiler logs tab
     setActiveTab("logs");
 
     try {
+      // Use external build target if provided, otherwise use selected platform
+      const buildTarget = externalBuildTarget || (selectedPlatform === 'linux' ? 'wasm' : 'go');
+
       // Add initial log entries
       addLogEntry("🚀 Starting compilation process...");
+      addLogEntry(`📋 Build target: ${buildTarget}`);
       addLogEntry(`📋 Target platform: ${selectedPlatform}`);
       addLogEntry(`🤖 Agent name: ${agentConfig.name}`);
       addLogEntry("📂 Switched to Compiler Logs tab automatically");
@@ -325,33 +369,12 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
       };
       
       addLogEntry("Converting UI configuration to compiler format...");
-      
-      // Set up progress simulation
-      const progressSteps = [10, 20, 40, 60, 80, 100];
-      let currentStep = 0;
-      
-      const progressInterval = setInterval(() => {
-        if (currentStep < progressSteps.length) {
-          const progress = progressSteps[currentStep];
-          setCompileProgress(progress);
-          
-          // Add log entries for each progress step
-          if (progress === 10) addLogEntry("📁 Creating build directory...");
-          if (progress === 20) addLogEntry("⚙️ Generating Go code from templates...");
-          if (progress === 40) addLogEntry("📦 Embedding resources and prompts...");
-          if (progress === 60) addLogEntry("🐍 Generating Python agent service...");
-          if (progress === 80) addLogEntry("🔨 Compiling Go plugin...");
-          if (progress === 100) addLogEntry("✅ Compilation complete!");
-          
-          currentStep++;
-        } else {
-          clearInterval(progressInterval);
-        }
-      }, 800);
+      setCompileProgress(10);
       
       // Prepare the payload for the API
       const payload = {
         agentConfig: uiConfigForConversion,
+        buildTarget: buildTarget,
         advancedSettings: {
           isolationLevel: advancedSettings.isolationLevel,
           memoryLimit: advancedSettings.memoryLimit,
@@ -366,25 +389,9 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
       };
       
       // Handle platform-specific settings
-      addLogEntry(`Setting target platform: ${selectedPlatform}`);
-      
-      if (selectedPlatform === 'windows') {
-        addLogEntry("Configuring for Windows DLL output");
-      } else if (selectedPlatform === 'mac') {
-        addLogEntry("Configuring for macOS Dylib output");
-      } else {
-        addLogEntry("Configuring for Linux Shared Object output");
-      }
-      
+      addLogEntry(`Build target: ${buildTarget}, Platform: ${selectedPlatform}`);
       addLogEntry("Sending compilation request to backend server...");
-      
-      // Make the API call to the backend
-      addLogEntry("Connecting to backend server...");
-      
-      // Clear the progress interval if there's an error
-      const clearProgressOnError = () => {
-        clearInterval(progressInterval);
-      };
+      setCompileProgress(20);
 
       try {
         const response = await fetch('/api/compile', {
@@ -394,9 +401,6 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
           },
           body: JSON.stringify(payload),
         });
-        
-        // Clear the progress interval
-        clearInterval(progressInterval);
         
         // Process the response
         const result = await response.json();
@@ -466,7 +470,6 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
           });
         }
       } catch (error) {
-        clearProgressOnError();
         console.error("Compilation error:", error);
         setCompileStatus('error');
         setCompileResult({
@@ -492,8 +495,9 @@ const CompilerPanel = ({ agentConfig, onCompileComplete }: CompilerPanelProps): 
       }
     } finally {
       setIsCompiling(false);
+      isCompilingRef.current = false;
     }
-  };
+  }, [agentConfig, externalBuildTarget, selectedPlatform, advancedSettings, onCompileStart, onCompileComplete, addLogEntry, toast]);
 
   return (
     <div className="space-y-6">
