@@ -191,15 +191,25 @@ const CompilerPanel = ({
 
   // Function to poll GitHub Actions compilation status
   const pollGitHubActionsCompletion = async (jobId: string) => {
+    console.log("🎯 pollGitHubActionsCompletion called with jobId:", jobId);
+    addLogEntry(`🎯 Starting GitHub Actions polling for job: ${jobId}`);
+
     const maxAttempts = 60; // 5 minutes with 5-second intervals
     let attempts = 0;
 
     while (attempts < maxAttempts) {
       try {
         addLogEntry(`🔍 Checking compilation status... (${attempts + 1}/${maxAttempts})`);
+        console.log(`🔍 Making status request for job: ${jobId}, attempt: ${attempts + 1}`);
 
-        const statusResponse = await fetch(`/api/compile/status?jobId=${encodeURIComponent(jobId)}`);
+        const statusUrl = `/api/compile/status?jobId=${encodeURIComponent(jobId)}`;
+        console.log(`🔍 Status URL: ${statusUrl}`);
+
+        const statusResponse = await fetch(statusUrl);
+        console.log(`🔍 Status response status: ${statusResponse.status}`);
+
         const statusResult = await statusResponse.json();
+        console.log(`🔍 Status result:`, statusResult);
 
         if (!statusResponse.ok) {
           throw new Error(statusResult.message || 'Failed to check compilation status');
@@ -429,7 +439,27 @@ const CompilerPanel = ({
           // Don't call onCompileComplete yet - we're still compiling via GitHub Actions
           // Don't set isCompiling to false yet - we're still compiling via GitHub Actions
           // Start polling for completion (this will update the final state and call onCompileComplete when done)
-          await pollGitHubActionsCompletion(result.jobId);
+          console.log("🎯 About to start GitHub Actions polling for job:", result.jobId);
+          try {
+            await pollGitHubActionsCompletion(result.jobId);
+            console.log("🎯 GitHub Actions polling completed successfully");
+          } catch (pollingError) {
+            console.error("🎯 GitHub Actions polling failed:", pollingError);
+            addLogEntry(`❌ GitHub Actions polling failed: ${pollingError instanceof Error ? pollingError.message : String(pollingError)}`);
+
+            // Set error state
+            setCompileStatus('error');
+            setCompileResult({
+              success: false,
+              message: `GitHub Actions polling failed: ${pollingError instanceof Error ? pollingError.message : String(pollingError)}`
+            });
+
+            // Notify parent component of failure
+            onCompileComplete({
+              success: false,
+              message: `GitHub Actions polling failed: ${pollingError instanceof Error ? pollingError.message : String(pollingError)}`
+            });
+          }
           return; // Exit early to avoid the finally block setting isCompiling to false
         } else {
           // Local compilation completed immediately or GitHub Actions returned final result
