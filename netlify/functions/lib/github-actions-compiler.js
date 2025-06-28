@@ -1,6 +1,11 @@
 const { Octokit } = require('@octokit/rest');
 
 class GitHubActionsCompiler {
+  octokit;
+  owner;
+  repo;
+  workflowId;
+
   constructor(options) {
     this.octokit = new Octokit({
       auth: options.githubToken,
@@ -16,7 +21,9 @@ class GitHubActionsCompiler {
   async triggerCompilation(config) {
     try {
       // Create a unique job ID
-      const jobId = `compile-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const jobId = `compile-${Date.now()}-$${Math.random().toString(36).substring(2, 2 + 9)}`;
+
+      console.log(`🚀 Triggering GitHub Actions compilation with job ID$: ${jobId}`);
 
       // Trigger the workflow
       const response = await this.octokit.actions.createWorkflowDispatch({
@@ -33,12 +40,14 @@ class GitHubActionsCompiler {
       });
 
       if (response.status !== 204) {
-        throw new Error(`Failed to trigger workflow: ${response.status}`);
+        throw new Error(`Failed to trigger workflow$: ${response.status}`);
       }
 
+      console.log(`✅ GitHub Actions workflow triggered successfully for job$: ${jobId}`);
       return jobId;
     } catch (error) {
-      throw new Error(`GitHub Actions compilation trigger failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.error('GitHub Actions trigger error:', error);
+      throw new Error(`GitHub Actions compilation trigger failed$: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -47,6 +56,8 @@ class GitHubActionsCompiler {
    */
   async getCompilationStatus(jobId) {
     try {
+      console.log(`🔍 Checking GitHub Actions status for job ID$: ${jobId}`);
+
       // Get recent workflow runs
       const runs = await this.octokit.actions.listWorkflowRuns({
         owner: this.owner,
@@ -55,18 +66,50 @@ class GitHubActionsCompiler {
         per_page: 50
       });
 
-      // Find the run with our job ID
-      const targetRun = runs.data.workflow_runs.find(run => 
-        run.name?.includes(jobId) || run.head_commit?.message?.includes(jobId)
-      );
+      console.log(`📋 Found $${runs.data.workflow_runs.length} recent workflow runs`);
+
+      // Find the run with our job ID - check multiple ways
+      const targetRun = runs.data.workflow_runs.find(run => {
+        // Check if job ID is in the run name (this should work with our run-name setting)
+        if (run.name?.includes(jobId)) {
+          console.log(`🎯 Found run by name: ${run.name}`);
+          return true;
+        }
+
+        // Check if job ID is in the display title
+        if (run.display_title?.includes(jobId)) {
+          console.log(`🎯 Found run by display title: ${run.display_title}`);
+          return true;
+        }
+
+        // Check if job ID is in the head commit message
+        if (run.head_commit?.message?.includes(jobId)) {
+          console.log(`🎯 Found run by commit message: ${run.head_commit.message}`);
+          return true;
+        }
+
+        return false;
+      });
 
       if (!targetRun) {
+        console.log(`❌ No workflow run found for job ID$: ${jobId}`);
+        console.log('Recent runs:', runs.data.workflow_runs.map(run => ({
+          id: run.id,
+          name: run.name,
+          display_title: run.display_title,
+          status: run.status,
+          conclusion: run.conclusion,
+          created_at: run.created_at
+        })));
+
         return {
-          id: jobId,
+          id,
           status: 'pending',
-          error: 'Workflow run not found'
+          error: 'Workflow run not found - check if GitHub Actions workflow was triggered successfully'
         };
       }
+
+      console.log(`✅ Found workflow run{targetRun.id} (${targetRun.status}/$${targetRun.conclusion})`);
 
       // Map GitHub Actions status to our status
       let status;
@@ -83,7 +126,7 @@ class GitHubActionsCompiler {
       }
 
       const result = {
-        id: jobId,
+        id,
         status
       };
 
@@ -96,12 +139,16 @@ class GitHubActionsCompiler {
             run_id: targetRun.id
           });
 
-          const pluginArtifact = artifacts.data.artifacts.find(artifact => 
+          const pluginArtifact = artifacts.data.artifacts.find(artifact =>
             artifact.name.includes('plugin') || artifact.name.includes(jobId)
           );
 
           if (pluginArtifact) {
-            result.downloadUrl = pluginArtifact.archive_download_url;
+            // Store the raw GitHub artifact URL for internal processing
+            result.rawDownloadUrl = pluginArtifact.archive_download_url;
+
+            // Provide our endpoint that will download and serve the zip file
+            result.downloadUrl = `/api/download/github-artifact/$${jobId}`;
           }
         } catch (artifactError) {
           console.error('Error fetching artifacts:', artifactError);
@@ -119,7 +166,7 @@ class GitHubActionsCompiler {
 
           const failedJob = jobs.data.jobs.find(job => job.conclusion === 'failure');
           if (failedJob) {
-            result.error = `Compilation failed in step: ${failedJob.name}`;
+            result.error = `Compilation failed in step${failedJob.name}`;
           }
         } catch (logError) {
           console.error('Error fetching job logs:', logError);
@@ -129,9 +176,9 @@ class GitHubActionsCompiler {
       return result;
     } catch (error) {
       return {
-        id: jobId,
+        id,
         status: 'failed',
-        error: `Status check failed: ${error instanceof Error ? error.message : String(error)}`
+        error: `Status check failed${error instanceof Error ? error.message : String(error)}`
       };
     }
   }
@@ -155,7 +202,7 @@ class GitHubActionsCompiler {
     }
 
     return {
-      id: jobId,
+      id,
       status: 'failed',
       error: 'Compilation timeout'
     };
@@ -169,7 +216,7 @@ class GitHubActionsCompiler {
       const response = await this.octokit.request('GET ' + downloadUrl);
       return Buffer.from(response.data);
     } catch (error) {
-      throw new Error(`Failed to download artifact: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Failed to download artifact$: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
@@ -196,7 +243,5 @@ function createGitHubActionsCompiler() {
   });
 }
 
-module.exports = {
-  GitHubActionsCompiler,
-  createGitHubActionsCompiler
-};
+
+module.exports = { GitHubActionsCompiler, createGitHubActionsCompiler };

@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/compile/status
-// Generated: 2025-06-28T00:35:19.933Z
+// Generated: 2025-06-28T04:35:23.939Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createGitHubActionsCompiler } = require('./lib/github-actions-compiler.js');
@@ -33,7 +33,10 @@ async function GET(event, context) {
     const { searchParams } = new URL(`https://${event.headers.host}${event.path}`);
     const jobId = searchParams.get('jobId');
 
+    console.log(`🔍 Status check requested for job ID: ${jobId}`);
+
     if (!jobId) {
+      console.log('❌ Missing jobId parameter');
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
@@ -42,17 +45,28 @@ async function GET(event, context) {
     };
     }
 
+    // Check environment variables
+    const githubToken = process.env.GITHUB_TOKEN;
+    const githubOwner = process.env.GITHUB_OWNER || 'guiperry';
+    const githubRepo = process.env.GITHUB_REPO || 'next-agentify';
+
+    console.log(`🔧 GitHub config: owner=${githubOwner}, repo=${githubRepo}, token=${githubToken ? 'configured' : 'missing'}`);
+
     const githubCompiler = createGitHubActionsCompiler();
     if (!githubCompiler) {
+      console.log('❌ GitHub Actions compiler not available - missing token');
       return {
       statusCode: 503,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({success: false,
-        message: 'GitHub Actions compiler not available'})
+        message: 'GitHub Actions compiler not available - GitHub token not configured'})
     };
     }
 
+    console.log(`📡 Checking compilation status for job: ${jobId}`);
     const status = await githubCompiler.getCompilationStatus(jobId);
+
+    console.log(`📊 Status result:`, status);
 
     return {
       statusCode: 200,

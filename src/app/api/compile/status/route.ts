@@ -6,22 +6,36 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const jobId = searchParams.get('jobId');
 
+    console.log(`🔍 Status check requested for job ID: ${jobId}`);
+
     if (!jobId) {
+      console.log('❌ Missing jobId parameter');
       return NextResponse.json({
         success: false,
         message: 'Missing jobId parameter'
       }, { status: 400 });
     }
 
+    // Check environment variables
+    const githubToken = process.env.GITHUB_TOKEN;
+    const githubOwner = process.env.GITHUB_OWNER || 'guiperry';
+    const githubRepo = process.env.GITHUB_REPO || 'next-agentify';
+
+    console.log(`🔧 GitHub config: owner=${githubOwner}, repo=${githubRepo}, token=${githubToken ? 'configured' : 'missing'}`);
+
     const githubCompiler = createGitHubActionsCompiler();
     if (!githubCompiler) {
+      console.log('❌ GitHub Actions compiler not available - missing token');
       return NextResponse.json({
         success: false,
-        message: 'GitHub Actions compiler not available'
+        message: 'GitHub Actions compiler not available - GitHub token not configured'
       }, { status: 503 });
     }
 
+    console.log(`📡 Checking compilation status for job: ${jobId}`);
     const status = await githubCompiler.getCompilationStatus(jobId);
+
+    console.log(`📊 Status result:`, status);
 
     return NextResponse.json({
       success: true,

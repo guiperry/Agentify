@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/agent/validate
-// Generated: 2025-06-28T00:11:48.891Z
+// Generated: 2025-06-28T04:35:23.914Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 

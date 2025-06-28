@@ -40,6 +40,8 @@ export class GitHubActionsCompiler {
       // Create a unique job ID
       const jobId = `compile-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+      console.log(`🚀 Triggering GitHub Actions compilation with job ID: ${jobId}`);
+
       // Trigger the workflow
       const response = await this.octokit.actions.createWorkflowDispatch({
         owner: this.owner,
@@ -58,8 +60,10 @@ export class GitHubActionsCompiler {
         throw new Error(`Failed to trigger workflow: ${response.status}`);
       }
 
+      console.log(`✅ GitHub Actions workflow triggered successfully for job: ${jobId}`);
       return jobId;
     } catch (error) {
+      console.error('GitHub Actions trigger error:', error);
       throw new Error(`GitHub Actions compilation trigger failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -69,6 +73,8 @@ export class GitHubActionsCompiler {
    */
   async getCompilationStatus(jobId: string): Promise<CompilationJob> {
     try {
+      console.log(`🔍 Checking GitHub Actions status for job ID: ${jobId}`);
+
       // Get recent workflow runs
       const runs = await this.octokit.actions.listWorkflowRuns({
         owner: this.owner,
@@ -77,18 +83,51 @@ export class GitHubActionsCompiler {
         per_page: 50
       });
 
-      // Find the run with our job ID
-      const targetRun = runs.data.workflow_runs.find(run => 
-        run.name?.includes(jobId) || run.head_commit?.message?.includes(jobId)
-      );
+      console.log(`📋 Found ${runs.data.workflow_runs.length} recent workflow runs`);
+
+      // Find the run with our job ID - check multiple ways
+      const targetRun = runs.data.workflow_runs.find(run => {
+        // Check if job ID is in the run name (this should work with our run-name setting)
+        if (run.name?.includes(jobId)) {
+          console.log(`🎯 Found run by name: ${run.name}`);
+          return true;
+        }
+
+        // Check if job ID is in the display title
+        if (run.display_title?.includes(jobId)) {
+          console.log(`🎯 Found run by display title: ${run.display_title}`);
+          return true;
+        }
+
+        // Check if job ID is in the head commit message
+        if (run.head_commit?.message?.includes(jobId)) {
+          console.log(`🎯 Found run by commit message: ${run.head_commit.message}`);
+          return true;
+        }
+
+        return false;
+      });
 
       if (!targetRun) {
+        console.log(`❌ No workflow run found for job ID: ${jobId}`);
+        console.log('Recent runs:', runs.data.workflow_runs.map(run => ({
+          id: run.id,
+          name: run.name,
+          display_title: run.display_title,
+          status: run.status,
+          conclusion: run.conclusion,
+          created_at: run.created_at
+        })));
+
         return {
           id: jobId,
           status: 'pending',
-          error: 'Workflow run not found'
+          error: 'Workflow run not found - check if GitHub Actions workflow was triggered successfully'
         };
       }
+
+      console.log(`✅ Found workflow run: ${targetRun.id} (${targetRun.status}/${targetRun.conclusion})`);
+
 
       // Map GitHub Actions status to our status
       let status: CompilationJob['status'];

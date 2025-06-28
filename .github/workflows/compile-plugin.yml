@@ -29,6 +29,9 @@ on:
           - darwin
           - windows
 
+# Set the run name to include the job ID for easier tracking
+run-name: "Compile Agent Plugin - Job ${{ inputs.job_id }}"
+
 jobs:
   compile:
     runs-on: ubuntu-latest

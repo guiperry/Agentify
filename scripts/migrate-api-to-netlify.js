@@ -25,8 +25,15 @@ function log(message, color = 'reset') {
 
 // Configuration
 const API_ROUTES_DIR = path.join(process.cwd(), 'src', 'app', 'api');
+const LIB_DIR = path.join(process.cwd(), 'src', 'lib');
 const NETLIFY_FUNCTIONS_DIR = path.join(process.cwd(), 'netlify', 'functions');
+const NETLIFY_LIB_DIR = path.join(NETLIFY_FUNCTIONS_DIR, 'lib');
 const GENERATED_PREFIX = 'api-';
+
+// Library files that need to be migrated to Netlify functions
+const LIBRARY_FILES_TO_MIGRATE = [
+  'github-actions-compiler.ts'
+];
 
 // Ensure netlify functions directory exists
 function ensureNetlifyFunctionsDir() {
@@ -34,6 +41,134 @@ function ensureNetlifyFunctionsDir() {
     fs.mkdirSync(NETLIFY_FUNCTIONS_DIR, { recursive: true });
     log(`📁 Created Netlify functions directory: ${NETLIFY_FUNCTIONS_DIR}`, 'green');
   }
+}
+
+// Ensure netlify functions lib directory exists
+function ensureNetlifyLibDir() {
+  if (!fs.existsSync(NETLIFY_LIB_DIR)) {
+    fs.mkdirSync(NETLIFY_LIB_DIR, { recursive: true });
+    log(`📁 Created Netlify functions lib directory: ${NETLIFY_LIB_DIR}`, 'green');
+  }
+}
+
+// Convert TypeScript library file to JavaScript for Netlify
+function convertLibraryFile(filename) {
+  const sourceFile = path.join(LIB_DIR, filename);
+  const targetFile = path.join(NETLIFY_LIB_DIR, filename.replace('.ts', '.js'));
+
+  if (!fs.existsSync(sourceFile)) {
+    log(`⚠️  Library file not found: ${sourceFile}`, 'yellow');
+    return null;
+  }
+
+  log(`🔄 Converting library file: ${filename}`, 'cyan');
+
+  let content = fs.readFileSync(sourceFile, 'utf8');
+
+  // Convert TypeScript to JavaScript
+  content = convertTypeScriptToJavaScript(content);
+
+  return {
+    filename: path.basename(targetFile),
+    path: targetFile,
+    content: content
+  };
+}
+
+// Convert TypeScript syntax to JavaScript
+function convertTypeScriptToJavaScript(content) {
+  let converted = content;
+
+  // Remove TypeScript imports and convert to CommonJS
+  converted = converted.replace(/^import\s+.*?from\s+['"]([^'"]+)['"];?\s*$/gm, (match, modulePath) => {
+    if (modulePath.startsWith('@octokit/')) {
+      return `const { Octokit } = require('${modulePath}');`;
+    }
+    return ''; // Remove other imports that can't be converted
+  });
+
+  // Remove export statements and convert to module.exports
+  converted = converted.replace(/^export\s+/gm, '');
+
+  // Remove private/public/protected keywords
+  converted = converted.replace(/\b(private|public|protected)\s+/g, '');
+
+  // Remove TypeScript type annotations (more comprehensive but preserve switch case colons)
+  converted = converted.replace(/:\s*Promise<[^>]+>/g, '');
+
+  // Remove function return type annotations
+  converted = converted.replace(/\)\s*:\s*[A-Za-z_$][A-Za-z0-9_$|<>\[\]\s]*\s*\{/g, ') {');
+
+  // More careful type annotation removal that doesn't affect switch cases
+  // Only remove type annotations that are followed by = or { or ) or ; or ,
+  converted = converted.replace(/:\s*[A-Za-z_$][A-Za-z0-9_$]*(<[^>]*>)?(\[\])?(?=\s*[=,;)\{])/g, '');
+  converted = converted.replace(/:\s*\{[^}]*\}(?=\s*[=,;)\{])/g, '');
+  converted = converted.replace(/:\s*string\[\](?=\s*[=,;)\{])/g, '');
+  converted = converted.replace(/:\s*(string|number|boolean|void|any)(?=\s*[=,;)\{])/g, '');
+
+  // Remove complex type annotations like CompilationJob['status'] but not in switch cases
+  converted = converted.replace(/let\s+\w+:\s*\w+\['[^']+'\]/g, (match) => {
+    return match.replace(/:\s*\w+\['[^']+'\]/, '');
+  });
+
+  // Remove type assertions (as Type)
+  converted = converted.replace(/\s+as\s+\w+/g, '');
+  converted = converted.replace(/\s+as\s+[A-Za-z<>[\]]+/g, '');
+
+  // Remove interface definitions
+  converted = converted.replace(/^interface\s+\w+\s*\{[\s\S]*?\}/gm, '');
+
+  // Remove type definitions
+  converted = converted.replace(/^type\s+\w+\s*=[\s\S]*?;/gm, '');
+
+  // Remove generic type parameters from function definitions
+  converted = converted.replace(/async\s+(\w+)<[^>]*>/g, 'async $1');
+  converted = converted.replace(/(\w+)<[^>]*>\s*\(/g, '$1(');
+
+  // Fix switch case syntax if it got corrupted
+  converted = converted.replace(/case\s+'([^']+)'\s*=\s*'([^']+)';/g, "case '$1':\n          status = '$2';");
+  converted = converted.replace(/case\s+'([^']+)'\s*=\s*([^;]+);/g, "case '$1':\n          status = $2;");
+  converted = converted.replace(/default\s*=\s*'([^']+)';/g, "default:\n          status = '$1';");
+
+  // Fix object property assignment syntax
+  converted = converted.replace(/const\s+(\w+)\s*=\s*\{/g, 'const $1 = {');
+
+  // Fix shorthand property syntax (job_id should be job_id: jobId)
+  converted = converted.replace(/job_id,/g, 'job_id: jobId,');
+
+  // Replace deprecated substr with substring
+  converted = converted.replace(/\.substr\((\d+),\s*(\d+)\)/g, '.substring($1, $1 + $2)');
+
+  // Fix template literal corruption - sometimes ${} gets converted to {}
+  // This is a post-processing fix for template literals
+  converted = converted.replace(/`([^`]*)\{([^}]+)\}([^`]*)`/g, (match, before, content, after) => {
+    // Only fix if it looks like it should be a template literal variable
+    if (content.includes('jobId') || content.includes('error') || content.includes('response') ||
+        content.includes('targetRun') || content.includes('runs.data') || content.includes('failedJob') ||
+        content.includes('Date.now') || content.includes('Math.random')) {
+      return `\`${before}\${${content}}${after}\``;
+    }
+    return match;
+  });
+
+  // Additional fix for template literals that might have lost the colon
+  converted = converted.replace(/console\.log\(`([^`]*) ID\{([^}]+)\}`\)/g, 'console.log(`$1 ID: ${$2}`)');
+  converted = converted.replace(/console\.log\(`([^`]*)\{([^}]+)\}`\)/g, 'console.log(`$1: ${$2}`)');
+  converted = converted.replace(/Error\(`([^`]*)\{([^}]+)\}`\)/g, 'Error(`$1: ${$2}`)');
+  converted = converted.replace(/`([^`]*) in step\{([^}]+)\}`/g, '`$1 in step: ${$2}`');
+
+  // Remove empty lines that might have been created
+  converted = converted.replace(/\n\s*\n\s*\n/g, '\n\n');
+
+  // Convert class exports to module.exports
+  converted = converted.replace(/class\s+(\w+)/g, 'class $1');
+
+  // Add module.exports at the end for the main class
+  if (converted.includes('class GitHubActionsCompiler')) {
+    converted += '\n\nmodule.exports = { GitHubActionsCompiler, createGitHubActionsCompiler };';
+  }
+
+  return converted;
 }
 
 // Get all API route files recursively
@@ -544,9 +679,35 @@ async function migrateApiRoutes(options = {}) {
   try {
     // Ensure directories exist
     ensureNetlifyFunctionsDir();
+    ensureNetlifyLibDir();
 
     // Note: We don't clean up functions here - we'll replace/create as needed
-    
+
+    // Migrate library files first
+    log('📚 Migrating library files...', 'cyan');
+    const libraryFiles = [];
+    for (const filename of LIBRARY_FILES_TO_MIGRATE) {
+      try {
+        const libFile = convertLibraryFile(filename);
+        if (libFile) {
+          libraryFiles.push(libFile);
+
+          if (testMode) {
+            log(`🧪 Test conversion for library file ${filename}:`, 'cyan');
+            log(`   Target: ${libFile.filename}`, 'cyan');
+            log(`   Content preview (first 200 chars):`, 'cyan');
+            log(`   ${libFile.content.substring(0, 200)}...`, 'cyan');
+            log('', 'reset');
+          } else {
+            fs.writeFileSync(libFile.path, libFile.content, 'utf8');
+            log(`✅ Migrated library file: ${libFile.filename}`, 'green');
+          }
+        }
+      } catch (error) {
+        log(`❌ Failed to migrate library file ${filename}: ${error.message}`, 'red');
+      }
+    }
+
     // Get all API routes
     let routes = getApiRoutes(API_ROUTES_DIR);
 
@@ -601,11 +762,13 @@ async function migrateApiRoutes(options = {}) {
     // Summary
     log('\n📈 Migration Summary:', 'blue');
     log(`✅ Successfully migrated: ${functions.length}/${routes.length} routes`, 'green');
-    log(`📁 Generated functions in: ${NETLIFY_FUNCTIONS_DIR}`, 'cyan');
-    
-    if (functions.length > 0) {
+    log(`� Successfully migrated: ${libraryFiles.length}/${LIBRARY_FILES_TO_MIGRATE.length} library files`, 'green');
+    log(`�📁 Generated functions in: ${NETLIFY_FUNCTIONS_DIR}`, 'cyan');
+    log(`📁 Generated library files in: ${NETLIFY_LIB_DIR}`, 'cyan');
+
+    if (functions.length > 0 || libraryFiles.length > 0) {
       log('\n🎉 Migration completed successfully!', 'green');
-      log('Your Next.js API routes are now available as Netlify functions.', 'green');
+      log('Your Next.js API routes and library files are now available as Netlify functions.', 'green');
     }
     
     return true;

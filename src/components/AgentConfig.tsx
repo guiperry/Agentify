@@ -600,6 +600,7 @@ const AgentConfig = ({
   };
 
   const handleCompile = async () => {
+    console.log("🚀 AgentConfig handleCompile called");
     setIsCompiling(true);
     setCompileStatus('compiling');
 
@@ -608,6 +609,7 @@ const AgentConfig = ({
 
     // Use a small delay to ensure the tab switch happens, then trigger the CompilerPanel compile
     setTimeout(() => {
+      console.log("🎯 Triggering CompilerPanel compilation");
       // The CompilerPanel will handle the actual compilation and navigation to logs tab
       setTriggerCompile(Date.now()); // This will trigger the CompilerPanel to start compilation
     }, 100);
@@ -1660,7 +1662,7 @@ const AgentConfig = ({
                   setCompileStatus('compiling');
                 }}
                 onCompileComplete={(result) => {
-                  console.log("Compilation result:", result);
+                  console.log("🎯 AgentConfig received compilation result:", result);
 
                   // Reset main compile button state
                   setIsCompiling(false);
