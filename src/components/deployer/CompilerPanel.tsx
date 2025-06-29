@@ -483,6 +483,8 @@ const CompilerPanel = ({
       // Create a UI config object that matches the expected format for conversion
       const uiConfigForConversion = {
         name: agentConfig.name,
+        // Explicitly add agent_name to ensure it's available for GitHub Actions compilation
+        agent_name: agentConfig.name,
         personality: agentConfig.personality,
         instructions: agentConfig.instructions || `You are ${agentConfig.name}, a helpful AI assistant.`,
         features: agentConfig.features,

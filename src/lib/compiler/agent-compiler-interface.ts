@@ -90,6 +90,8 @@ interface MCPServerConfig {
 
 interface UIConfig {
   name: string;
+  // Optional agent_name property that can be provided by the UI
+  agent_name?: string;
   personality: string;
   instructions: string;
   features: Record<string, unknown>;
@@ -222,6 +224,7 @@ export async function createAgentCompilerService(): Promise<AgentCompilerService
       const uiConfigObj = uiConfig as UIConfig;
       const {
         name: agentName,
+        agent_name: existingAgentName, // Check if agent_name is already provided
         personality: agentPersonality,
         instructions: agentInstructions,
         features: agentFeatures,
@@ -237,10 +240,19 @@ export async function createAgentCompilerService(): Promise<AgentCompilerService
       // Generate a unique ID for the agent
       const agentId = uuidv4();
       
+      // Log the UI config for debugging
+      console.log('Converting UI config to plugin config:', {
+        hasName: !!agentName,
+        hasExistingAgentName: !!existingAgentName,
+        name: agentName,
+        existingAgentName: existingAgentName
+      });
+      
       // Create the basic configuration
       const agentConfig: AgentPluginConfig = {
         agent_id: agentId,
-        agent_name: `urn:agent:agentify:${agentName.toLowerCase().replace(/\s+/g, '-')}`,
+        // Use existing agent_name if provided, otherwise generate one from the name
+        agent_name: existingAgentName || `urn:agent:agentify:${agentName.toLowerCase().replace(/\s+/g, '-')}`,
         agentType: 'llm',
         description: agentInstructions || `${agentName} is a helpful AI assistant.`,
         version: '1.0.0',
@@ -353,6 +365,13 @@ export async function createAgentCompilerService(): Promise<AgentCompilerService
           isEmbedded: true
         });
       }
+
+      // Log the final agent config for debugging
+      console.log('Final plugin config:', {
+        agent_id: agentConfig.agent_id,
+        agent_name: agentConfig.agent_name,
+        hasAgentName: !!agentConfig.agent_name
+      });
 
       return agentConfig;
     },
