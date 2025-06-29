@@ -9,6 +9,7 @@ interface AuthContextType extends AuthState {
   handleGoogleLoginError: () => void;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   validateToken: () => Promise<boolean>;
 }
@@ -94,6 +95,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  // Handle password reset
+  const resetPassword = async (email: string): Promise<void> => {
+    try {
+      await supabaseAuthService.resetPassword(email);
+    } catch (error) {
+      console.error('Password reset failed:', error);
+      throw error;
+    }
+  };
+
   // Logout
   const logout = async (): Promise<void> => {
     try {
@@ -121,6 +132,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     handleGoogleLoginError,
     signInWithEmail,
     signUpWithEmail,
+    resetPassword,
     logout,
     validateToken,
   };

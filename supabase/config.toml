@@ -34,7 +34,12 @@ enable_signup = true
 # Site URL for redirects
 site_url = "http://localhost:3000"
 # Additional redirect URLs
-additional_redirect_urls = ["http://localhost:3000/auth/callback", "https://your-netlify-domain.netlify.app/auth/callback"]
+additional_redirect_urls = [
+  "http://localhost:3000/auth/callback",
+  "https://next-agentify.vercel.app/auth/callback",
+  "https://next-agentify.vercel.app",
+  "http://localhost:3000"
+]
 # JWT expiry time
 jwt_expiry = 3600
 # Enable email confirmations
@@ -43,16 +48,24 @@ enable_confirmations = false
 enable_email_change_confirmations = true
 # Enable phone confirmations
 enable_phone_confirmations = false
+# Enable password recovery
+enable_password_recovery = true
 
 # External OAuth providers
 [auth.external.google]
 enabled = true
 client_id = "env(GOOGLE_CLIENT_ID)"
 secret = "env(GOOGLE_CLIENT_SECRET)"
-redirect_uri = "http://localhost:54321/auth/v1/callback"
+redirect_uri = "https://movvczmmdmxalnpbptwx.supabase.co/auth/v1/callback"
 
 [auth.external.github]
 enabled = false
+
+# Email templates
+[auth.email]
+# Password recovery email template
+[auth.email.recovery]
+subject = "Reset Your Agentify Password"
 
 [auth.external.apple]
 enabled = false

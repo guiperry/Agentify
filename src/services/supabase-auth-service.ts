@@ -1,84 +1,15 @@
-import { createClient, SupabaseClient, Session, User as SupabaseUser, AuthError } from '@supabase/supabase-js';
-
-// Define the callback type for auth state changes
-type AuthStateChangeCallback = (event: string, session: Session | null) => void;
-
-// Define a type for our mock Supabase client to ensure type safety
-interface MockSupabaseClient {
-  auth: {
-    getSession: () => Promise<{ data: { session: Session | null }, error: Error | null }>;
-    getUser: () => Promise<{ data: { user: SupabaseUser | null, session: Session | null }, error: Error | null }>;
-    signInWithIdToken: (params: any) => Promise<{ data: { user: SupabaseUser | null, session: Session | null }, error: Error | null }>;
-    signInWithPassword: (params: any) => Promise<{ data: { user: SupabaseUser | null, session: Session | null }, error: Error | null }>;
-    signUp: (params: any) => Promise<{ data: { user: SupabaseUser | null, session: Session | null }, error: Error | null }>;
-    signOut: () => Promise<{ error: Error | null }>;
-    onAuthStateChange: (callback: AuthStateChangeCallback) => 
-      { data: { subscription: { unsubscribe: () => void } } };
-  };
-  from: (table: string) => {
-    select: (columns?: string) => Promise<{ data: any | null, error: Error | null }>;
-    insert: (data: any) => Promise<{ data: any | null, error: Error | null }>;
-    upsert: (data: any) => Promise<{ data: any | null, error: Error | null }>;
-    update: (data: any) => Promise<{ data: any | null, error: Error | null }>;
-    delete: () => Promise<{ data: any | null, error: Error | null }>;
-  };
-}
+import { createClient, Session, User as SupabaseUser } from '@supabase/supabase-js';
 
 // Check if Supabase environment variables are available
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Initialize Supabase client with error handling
-let supabase: SupabaseClient | MockSupabaseClient;
-
-try {
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('Supabase environment variables are missing. Authentication will not work properly.');
-    // Create a dummy client that will throw clear errors when used
-    supabase = {
-      auth: {
-        getSession: () => Promise.resolve({ data: { session: null }, error: new Error('Supabase configuration missing') }),
-        getUser: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase configuration missing') }),
-        signInWithIdToken: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase configuration missing') }),
-        signInWithPassword: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase configuration missing') }),
-        signUp: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase configuration missing') }),
-        signOut: () => Promise.resolve({ error: null }),
-        onAuthStateChange: (callback: AuthStateChangeCallback) => ({ data: { subscription: { unsubscribe: () => {} } } })
-      },
-      from: () => ({
-        select: () => Promise.resolve({ data: null, error: new Error('Supabase configuration missing') }),
-        insert: () => Promise.resolve({ data: null, error: new Error('Supabase configuration missing') }),
-        upsert: () => Promise.resolve({ data: null, error: new Error('Supabase configuration missing') }),
-        update: () => Promise.resolve({ data: null, error: new Error('Supabase configuration missing') }),
-        delete: () => Promise.resolve({ data: null, error: new Error('Supabase configuration missing') }),
-      })
-    };
-  } else {
-    // Initialize with actual credentials
-    supabase = createClient(supabaseUrl, supabaseAnonKey);
-  }
-} catch (error) {
-  console.error('Failed to initialize Supabase client:', error);
-  // Provide a fallback that won't crash the app
-  supabase = {
-    auth: {
-      getSession: () => Promise.resolve({ data: { session: null }, error: new Error('Supabase initialization failed') }),
-      getUser: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase initialization failed') }),
-      signInWithIdToken: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase initialization failed') }),
-      signInWithPassword: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase initialization failed') }),
-      signUp: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase initialization failed') }),
-      signOut: () => Promise.resolve({ error: null }),
-      onAuthStateChange: (callback: AuthStateChangeCallback) => ({ data: { subscription: { unsubscribe: () => {} } } })
-    },
-    from: () => ({
-      select: () => Promise.resolve({ data: null, error: new Error('Supabase initialization failed') }),
-      insert: () => Promise.resolve({ data: null, error: new Error('Supabase initialization failed') }),
-      upsert: () => Promise.resolve({ data: null, error: new Error('Supabase initialization failed') }),
-      update: () => Promise.resolve({ data: null, error: new Error('Supabase initialization failed') }),
-      delete: () => Promise.resolve({ data: null, error: new Error('Supabase initialization failed') }),
-    })
-  };
+// Initialize Supabase client - throw error if not configured properly
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Supabase environment variables are missing. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY');
 }
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 // Types for authentication
 export interface User {
@@ -385,7 +316,7 @@ class SupabaseAuthService {
   public async validateToken(): Promise<boolean> {
     try {
       const { data: { user }, error } = await supabase.auth.getUser();
-      
+
       if (error || !user) {
         await this.logout();
         return false;
@@ -396,6 +327,22 @@ class SupabaseAuthService {
       console.error('Token validation failed:', error);
       await this.logout();
       return false;
+    }
+  }
+
+  // Reset password
+  public async resetPassword(email: string): Promise<void> {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/reset-password`,
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Password reset failed';
+      throw new Error(errorMessage);
     }
   }
 

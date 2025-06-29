@@ -31,7 +31,7 @@ export class SSEManager {
   private connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error' = 'disconnected';
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 2; // Reduced from 5 to prevent excessive reconnection attempts
+  private maxReconnectAttempts = 5; // Increased to give more chances for reconnection
   private listeners = new Set<(message: SSEMessage) => void>();
   private statusListeners = new Set<(status: { isConnected: boolean; connectionStatus: string }) => void>();
   private isConnecting = false;

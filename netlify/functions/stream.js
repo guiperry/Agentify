@@ -126,16 +126,26 @@ exports.handler = async (event, context) => {
         userAgent: event.headers['user-agent'] || event.headers['User-Agent'] || 'unknown'
       });
       
-      // Create SSE response with connection confirmation
-      const sseData = JSON.stringify({
+      // Create SSE response with connection confirmation and heartbeat
+      // The heartbeat is important to keep the connection alive
+      const initialMessage = JSON.stringify({
         type: 'connection',
         message: 'SSE connection established',
         timestamp: new Date().toISOString(),
         userId: user.id,
         hasConfig: !!config
       });
+      
+      // Add a heartbeat message to ensure the client receives multiple messages
+      // This helps prevent the connection from closing prematurely
+      const heartbeatMessage = JSON.stringify({
+        type: 'heartbeat',
+        timestamp: new Date().toISOString()
+      });
 
-      const response = `data: ${sseData}\n\n`;
+      // Combine initial message and heartbeat
+      const response = `data: ${initialMessage}\n\n` + 
+                       `data: ${heartbeatMessage}\n\n`;
 
       return {
         statusCode: 200,

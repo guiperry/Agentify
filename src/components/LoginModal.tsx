@@ -17,6 +17,7 @@ import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google';
 import { useAuth } from '@/contexts/AuthContext';
 import { GOOGLE_CLIENT_ID } from '@/utils/env';
 import { useToast } from "@/hooks/use-toast";
+import ForgotPasswordModal from './ForgotPasswordModal';
 
 interface LoginModalProps {
   open: boolean;
@@ -29,6 +30,7 @@ const LoginModal = ({ open, onOpenChange, onLoginSuccess }: LoginModalProps) => 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const { handleGoogleLoginSuccess, handleGoogleLoginError, signInWithEmail, signUpWithEmail } = useAuth();
   const { toast } = useToast();
 
@@ -237,7 +239,9 @@ const LoginModal = ({ open, onOpenChange, onLoginSuccess }: LoginModalProps) => 
                 {isLoading ? "Signing In..." : "Sign In"}
               </Button>
               <Button
+                type="button"
                 variant="ghost"
+                onClick={() => setShowForgotPassword(true)}
                 className="w-full text-white/70 hover:text-white hover:bg-white/10"
               >
                 Forgot Password?
@@ -378,6 +382,12 @@ const LoginModal = ({ open, onOpenChange, onLoginSuccess }: LoginModalProps) => 
           </TabsContent>
         </Tabs>
       </DialogContent>
+
+      {/* Forgot Password Modal */}
+      <ForgotPasswordModal
+        open={showForgotPassword}
+        onOpenChange={setShowForgotPassword}
+      />
     </Dialog>
   );
 };

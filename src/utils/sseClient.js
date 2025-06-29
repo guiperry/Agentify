@@ -6,31 +6,51 @@ export class SSEClient {
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;
+    this.withCredentials = false; // Set to false to avoid CORS issues
   }
 
   connect() {
     try {
       console.log(`SSEClient: Connecting to ${this.url}`);
-      this.eventSource = new EventSource(this.url);
+      
+      // Create EventSource with options
+      this.eventSource = new EventSource(this.url, { 
+        withCredentials: this.withCredentials 
+      });
+      
+      // Add additional properties for debugging
+      this.readyState = this.eventSource.readyState;
       
       this.eventSource.onopen = () => {
         console.log('SSEClient: Connection opened successfully');
         this.reconnectAttempts = 0;
         this.reconnectDelay = 1000; // Reset delay on successful connection
+        this.readyState = this.eventSource.readyState;
         this.emit('open');
       };
   
       this.eventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          console.log('SSEClient: Received message:', data.type);
           this.emit(data.type, data);
+          
+          // Update readyState for debugging
+          this.readyState = this.eventSource.readyState;
         } catch (error) {
-          console.error('SSEClient: Error parsing SSE message:', error);
+          console.error('SSEClient: Error parsing SSE message:', error, 'Raw data:', event.data);
         }
       };
-  
+      
       this.eventSource.onerror = (err) => {
-        console.error('SSEClient: Connection error', err);
+        // Update readyState for debugging
+        this.readyState = this.eventSource ? this.eventSource.readyState : -1;
+        
+        console.error('SSEClient: Connection error', err, {
+          readyState: this.readyState,
+          url: this.url,
+          withCredentials: this.withCredentials
+        });
         
         // Always close the connection on error
         if (this.eventSource) {
@@ -38,7 +58,11 @@ export class SSEClient {
           this.eventSource = null;
         }
         
-        this.emit('error', { message: 'SSE connection error' });
+        this.emit('error', { 
+          message: 'SSE connection error',
+          readyState: this.readyState,
+          url: this.url
+        });
         
         // Don't attempt to reconnect here - let the SSEManager handle it
         this.emit('close');
