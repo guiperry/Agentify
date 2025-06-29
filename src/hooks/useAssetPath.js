@@ -19,18 +19,38 @@ export function useAssetPath(assetPath) {
 }
 
 /**
- * Hook specifically for the app logo
+ * Hook specifically for the app logo with preloading
  */
 export function useAppLogo() {
-  return useAssetPath('Agentify_logo_2.png');
+  const [isLoaded, setIsLoaded] = useState(false);
+  const logoPath = useAssetPath('Agentify_logo_2.png');
+  
+  useEffect(() => {
+    if (logoPath) {
+      // Preload the image
+      const img = new Image();
+      img.src = logoPath;
+      img.onload = () => {
+        setIsLoaded(true);
+      };
+      img.onerror = () => {
+        // Even if there's an error, we set loaded to true to show fallback
+        setIsLoaded(true);
+      };
+    }
+  }, [logoPath]);
+
+  return { logoPath, isLoaded };
 }
 
 /**
  * Hook for other common assets
  */
 export function useAssets() {
+  const { logoPath } = useAppLogo();
+  
   return {
-    logo: useAssetPath('Agentify_logo_2.png'),
+    logo: logoPath,
     favicon: useAssetPath('favicon.ico'),
     placeholder: useAssetPath('placeholder.svg')
   };

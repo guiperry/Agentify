@@ -31,7 +31,7 @@ export class SSEManager {
   private connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error' = 'disconnected';
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = 2; // Reduced from 5 to prevent excessive reconnection attempts
   private listeners = new Set<(message: SSEMessage) => void>();
   private statusListeners = new Set<(status: { isConnected: boolean; connectionStatus: string }) => void>();
   private isConnecting = false;
@@ -70,21 +70,39 @@ export class SSEManager {
   }
 
   connect(authToken?: string) {
-    if (!this.isBrowser) return;
-    if (this.isConnecting) return;
-    if (this.sseClient) return;
+    // Don't attempt to connect if not in browser, already connecting, or already have a client
+    if (!this.isBrowser) {
+      console.log('Not in browser environment - using local deployment tracking only');
+      return;
+    }
+    if (this.isConnecting) {
+      console.log('SSE connection already in progress, ignoring duplicate connect call');
+      return;
+    }
+    if (this.sseClient) {
+      console.log('SSE client already exists, ignoring duplicate connect call');
+      return;
+    }
+    
+    // Check if we've reached max reconnect attempts
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log('Maximum reconnection attempts reached, not attempting to connect');
+      return;
+    }
 
-    const baseUrl = process.env.NEXT_PUBLIC_SSE_URL || '/.netlify/functions/stream';
+    const baseUrl = process.env.NEXT_PUBLIC_SSE_URL || '/api/stream';
     const sseUrl = authToken ? `${baseUrl}?token=${authToken}` : baseUrl;
 
     try {
       this.isConnecting = true;
       this.connectionStatus = 'connecting';
       this.notifyStatusListeners();
+      console.log(`Attempting to connect to SSE endpoint: ${baseUrl}`);
 
       this.sseClient = new SSEClient(sseUrl);
       
       this.sseClient.on('open', () => {
+        console.log('SSE connection established successfully');
         this.isConnected = true;
         this.isConnecting = false;
         this.connectionStatus = 'connected';
@@ -92,18 +110,30 @@ export class SSEManager {
         this.notifyStatusListeners();
       });
 
-      this.sseClient.on('error', () => {
+      this.sseClient.on('error', (err: any) => {
+        console.error('SSE connection error:', err);
         this.isConnecting = false;
         this.connectionStatus = 'error';
         this.notifyStatusListeners();
+        
+        // Clean up the client on error
+        if (this.sseClient) {
+          this.sseClient = null;
+        }
+        
         this.handleReconnect();
       });
 
       this.sseClient.on('close', () => {
+        console.log('SSE connection closed');
         this.isConnected = false;
         this.isConnecting = false;
         this.connectionStatus = 'disconnected';
         this.notifyStatusListeners();
+        
+        // Clean up the client on close
+        this.sseClient = null;
+        
         this.handleReconnect();
       });
 
@@ -122,15 +152,34 @@ export class SSEManager {
       console.error('Failed to create SSE connection:', error);
       this.isConnecting = false;
       this.connectionStatus = 'error';
+      this.sseClient = null;
       this.notifyStatusListeners();
+      this.handleReconnect();
     }
   }
 
   private handleReconnect() {
+    // Only attempt to reconnect if we have listeners and haven't exceeded max attempts
     if (this.reconnectAttempts < this.maxReconnectAttempts && this.listeners.size > 0) {
       const delay = Math.pow(2, this.reconnectAttempts) * 1000;
       this.reconnectAttempts++;
-      this.reconnectTimeout = setTimeout(() => this.connect(), delay);
+      console.log(`SSE reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
+      this.reconnectTimeout = setTimeout(() => {
+        // Check if we still have listeners before attempting to reconnect
+        if (this.listeners.size > 0) {
+          this.connect();
+        } else {
+          console.log('No active SSE listeners, canceling reconnection attempts');
+          this.reconnectAttempts = this.maxReconnectAttempts; // Stop further attempts
+        }
+      }, delay);
+    } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log('Maximum SSE reconnection attempts reached, giving up');
+      // Reset connection state to avoid further attempts
+      this.isConnected = false;
+      this.isConnecting = false;
+      this.connectionStatus = 'disconnected';
+      this.sseClient = null;
     }
   }
 
@@ -153,8 +202,13 @@ export class SSEManager {
   }
 
   cleanup() {
+    // Disconnect if there are no active listeners
     if (this.listeners.size === 0 && this.statusListeners.size === 0) {
+      console.log('No active SSE listeners, disconnecting');
       this.disconnect();
+      
+      // Reset reconnection attempts to prevent further connection attempts
+      this.reconnectAttempts = this.maxReconnectAttempts;
     }
   }
 

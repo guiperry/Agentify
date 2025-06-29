@@ -12,7 +12,7 @@ const MiniLoadingScreen = ({
   className = '',
   animated = true
 }) => {
-  const logoPath = useAppLogo();
+  const { logoPath, isLoaded } = useAppLogo();
   const sizeClasses = {
     small: {
       container: 'w-64 h-32',
@@ -57,16 +57,22 @@ const MiniLoadingScreen = ({
         )}
         <div className={`relative ${currentSize.padding} ${isLogoIcon ? 'bg-white rounded-xl' : 'bg-gradient-to-r from-purple-500/20 to-blue-500/20 rounded-full'} border border-purple-500/30`}>
           {isLogoIcon ? (
-            <img
-              src={logoPath}
-              alt="Agentify Logo"
-              className={`${currentSize.icon} object-contain ${animated ? 'animate-pulse' : ''}`}
-              onError={(e) => {
-                // Fallback to Zap icon if logo fails to load
-                e.target.style.display = 'none';
-                e.target.nextSibling.style.display = 'block';
-              }}
-            />
+            isLoaded ? (
+              <img
+                src={logoPath}
+                alt="Agentify Logo"
+                className={`${currentSize.icon} object-contain ${animated ? 'animate-pulse' : ''}`}
+                onError={(e) => {
+                  // Fallback to Zap icon if logo fails to load
+                  e.target.style.display = 'none';
+                  e.target.nextSibling.style.display = 'block';
+                }}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full w-full">
+                <div className={`w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin`}></div>
+              </div>
+            )
           ) : (
             <IconComponent className={`${currentSize.icon} text-purple-400 ${animated ? 'animate-pulse' : ''}`} />
           )}

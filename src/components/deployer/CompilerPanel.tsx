@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -10,17 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { 
-  Code, 
-  Package, 
-  Cpu, 
-  Shield, 
-  Zap, 
-  CheckCircle, 
-  XCircle, 
-  Loader2,
-  Download,
+import {
+  Package,
+  Cpu,
+  Shield,
+  CheckCircle,
+  XCircle,
   Settings,
   Terminal
 } from "lucide-react";
@@ -316,7 +310,9 @@ const CompilerPanel = ({
             message: 'GitHub Actions compilation completed successfully',
             compilationMethod: 'github-actions',
             downloadUrl: statusResult.downloadUrl,
-            filename: `agent-plugin-${jobId}.zip`,
+            filename: statusResult.agentName && statusResult.agentName !== 'agent' ? 
+              `${statusResult.agentName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()}-plugin-${jobId}.zip` : 
+              `${agentConfig.name.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()}-plugin-${jobId}.zip`,
             logs: statusResult.logs || []
           });
 
@@ -326,7 +322,9 @@ const CompilerPanel = ({
             message: 'GitHub Actions compilation completed successfully',
             compilationMethod: 'github-actions',
             downloadUrl: statusResult.downloadUrl,
-            filename: `agent-plugin-${jobId}.zip`,
+            filename: statusResult.agentName && statusResult.agentName !== 'agent' ? 
+              `${statusResult.agentName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()}-plugin-${jobId}.zip` : 
+              `${agentConfig.name.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()}-plugin-${jobId}.zip`,
             jobId: jobId
           };
           
@@ -740,17 +738,7 @@ const CompilerPanel = ({
                           </h4>
                           <p className="text-sm text-slate-300 mt-1">{compileResult.message}</p>
                           
-                          {compileResult.success && compileResult.downloadUrl && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="mt-2 border-green-800 text-green-400 hover:bg-green-900/30"
-                              onClick={() => window.open(compileResult.downloadUrl, '_blank')}
-                            >
-                              <Download className="mr-2 h-4 w-4" />
-                              Download Plugin ({compileResult.filename})
-                            </Button>
-                          )}
+
                         </div>
                       </div>
                     </div>

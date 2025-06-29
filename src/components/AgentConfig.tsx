@@ -12,12 +12,14 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Bot, Brain, Zap, Settings, Sparkles, Plus, Trash2, Server, Code, TestTube, Upload, FileText, CheckCircle, XCircle, Download, Share, Key, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
 import AgentHeaderActions from "@/components/AgentHeaderActions";
 import CompilerPanel from "@/components/deployer/CompilerPanel";
 import TestRunner from "@/components/deployer/TestRunner";
 import StatusDashboard from "@/components/deployer/StatusDashboard";
 import ImportConfigModal from "@/components/ImportConfigModal";
 import ExportConfigModal from "@/components/ExportConfigModal";
+import LoginModal from "@/components/LoginModal";
 import { parseConfigFile } from "@/services";
 import { configurationService, ProcessingStep } from "@/services/configurationService";
 import { useSSE } from "@/hooks/useSSE";
@@ -98,7 +100,7 @@ const AgentConfig = ({
   isActive,
   downloadModalOpen,
   setDownloadModalOpen,
-  onDownload,
+  onDownload: originalOnDownload,
   settingsModalOpen,
   setSettingsModalOpen
 }: AgentConfigProps) => {
@@ -112,6 +114,10 @@ const AgentConfig = ({
     analytics: true,
     notifications: false
   });
+
+  // Authentication and login modal state
+  const auth = useAuth();
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
 
   // Agent Facts state
   const [agentFacts, setAgentFacts] = useState<AgentFacts>({
@@ -154,7 +160,7 @@ const AgentConfig = ({
   const [isProcessingConfig, setIsProcessingConfig] = useState(false);
   const [currentProcessingTab, setCurrentProcessingTab] = useState<string>('');
   const [configProcessComplete, setConfigProcessComplete] = useState(false);
-  const [agentMinted, setAgentMinted] = useState(false);
+  const [agentDeployed, setAgentDeployed] = useState(false);
   const [compilationComplete, setCompilationComplete] = useState(false);
   const [compilationResult, setCompilationResult] = useState<{
     success: boolean;
@@ -174,6 +180,73 @@ const AgentConfig = ({
   useEffect(() => {
     console.log("🎯 AgentConfig isCompiling changed to:", isCompiling);
   }, [isCompiling]);
+  
+  // Expose compilationResult to window object for LocalDeploymentGuide to access
+  useEffect(() => {
+    if (compilationResult && compilationResult.success) {
+      // @ts-ignore
+      window.compilationResult = compilationResult;
+      // @ts-ignore
+      window.onPluginDownload = () => {
+        if (compilationResult.downloadUrl) {
+          window.open(compilationResult.downloadUrl, '_blank');
+        }
+      };
+    }
+  }, [compilationResult]);
+  
+  // Create a wrapper for onDownload that includes the compilationResult
+  const onDownload = (platform: 'windows' | 'mac' | 'linux') => {
+    console.log("🎯 AgentConfig onDownload called with platform:", platform);
+    console.log("🎯 AgentConfig compilationResult:", compilationResult);
+    
+    if (compilationResult && compilationResult.success) {
+      if (compilationResult.downloadUrl) {
+        // If we have a successful compilation with a download URL, open it in a new tab
+        console.log(`🔗 Opening download URL: ${compilationResult.downloadUrl}`);
+        
+        // Use the direct download URL from compilation result
+        if (compilationResult.downloadUrl) {
+          console.log(`📦 Opening download URL: ${compilationResult.downloadUrl}`);
+          window.open(compilationResult.downloadUrl, '_blank');
+        } else {
+          console.error('❌ No download URL available in compilation result');
+          toast({
+            title: "Download Error",
+            description: "No download URL available. Please try compiling again.",
+            variant: "destructive"
+          });
+        }
+        
+        toast({
+          title: "Downloading Plugin",
+          description: `Downloading agent plugin: ${
+            compilationResult.filename || 
+            (compilationResult.jobId ? 
+              `${agentName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()}-plugin-${compilationResult.jobId}.zip` : 
+              `${agentName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()}-plugin.zip`)
+          }`,
+        });
+      } else {
+        // Show an error message
+        toast({
+          title: "Download Failed",
+          description: "Download URL not available for the compiled plugin",
+          variant: "destructive",
+        });
+      }
+    } else {
+      // Show an error message
+      toast({
+        title: "Download Failed",
+        description: "Compilation not completed or was unsuccessful",
+        variant: "destructive",
+      });
+    }
+    
+    // Call the original onDownload function to download the engine
+    originalOnDownload(platform);
+  };
 
   // Upload state
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -196,13 +269,15 @@ const AgentConfig = ({
   const { toast } = useToast();
 
   // SSE for real-time updates using singleton
-  const { isConnected: sseConnected } = useSSE({
+  const { isConnected: sseConnected, connectionStatus } = useSSE({
     onMessage: (message) => {
       console.log('🔔 Raw SSE message received:', message);
       if (message.type === 'compilation_update') {
         setCompilationLogs(prev => [...prev, message.data]);
       }
     },
+    // Only attempt to connect if user is authenticated
+    autoConnect: !!auth.user?.accessToken,
     onCompilationUpdate: (update) => {
       console.log('🔔 Received compilation update:', update);
 
@@ -288,6 +363,11 @@ const AgentConfig = ({
     }
   });
 
+  // Log SSE connection status changes
+  useEffect(() => {
+    console.log(`🔌 SSE connection status: ${connectionStatus} (connected: ${sseConnected})`);
+  }, [connectionStatus, sseConnected]);
+
   // Update agent name when connected app changes (only if no saved progress)
   useEffect(() => {
     const savedProgress = localStorage.getItem('agentify-config-progress');
@@ -298,7 +378,7 @@ const AgentConfig = ({
     }
   }, [connectedApp.name]);
 
-  // Load saved progress on component mount
+  // Load saved progress on component mount - only run once
   useEffect(() => {
     const savedProgress = localStorage.getItem('agentify-config-progress');
     if (savedProgress) {
@@ -323,6 +403,28 @@ const AgentConfig = ({
         console.error('Failed to load saved progress:', error);
       }
     }
+  }, []); // Empty dependency array - only run once on mount
+  
+  // Separate useEffect for compilation result restoration
+  useEffect(() => {
+    // Restore compilation result if available
+    if (agentName) { // Only run if agentName is defined
+      const agentId = agentName.replace(/\s+/g, '-').toLowerCase();
+      const savedCompilationState = localStorage.getItem(`compilation-state-${agentId}`);
+      if (savedCompilationState) {
+        try {
+          const parsed = JSON.parse(savedCompilationState);
+          if (parsed.success && parsed.result) {
+            console.log("🎯 AgentConfig: Restoring compilation result from localStorage");
+            setCompilationResult(parsed.result);
+            setCompilationComplete(true);
+            setCompileStatus('success');
+          }
+        } catch (error) {
+          console.error('Failed to load saved compilation state:', error);
+        }
+      }
+    }
   }, []);
 
   // Save progress whenever key state changes
@@ -344,14 +446,20 @@ const AgentConfig = ({
     localStorage.setItem('agentify-config-progress', JSON.stringify(progressData));
   }, [agentName, personality, instructions, creativity, features, agentFacts, mcpServers, apiKeys, activeTab, configProcessComplete]);
 
-  // Clear saved progress when agent is successfully minted or when user clicks Clear Progress
+  // Clear saved progress when agent is successfully deployed or when user clicks Clear Progress
   const clearSavedProgress = () => {
     // Clear the main configuration progress
     localStorage.removeItem('agentify-config-progress');
-    
+
     // Also clear any compilation state that might be stored
     const agentId = agentName.replace(/\s+/g, '-').toLowerCase();
     localStorage.removeItem(`compilation-state-${agentId}`);
+  };
+
+  // Clear only configuration progress, preserve compilation data for deployment
+  const clearConfigProgress = () => {
+    // Clear only the main configuration progress, keep compilation data
+    localStorage.removeItem('agentify-config-progress');
   };
 
   // Export configuration
@@ -425,28 +533,148 @@ const AgentConfig = ({
     { id: 'expert', name: 'Expert', description: 'Technical and knowledgeable' },
   ];
 
-  const handleRegisterAgent = () => {
-    setAgentRegistered(true);
+  const handleRegisterAgent = async () => {
+    // Check if user is authenticated
+    if (!auth.isAuthenticated) {
+      // Open login modal
+      setLoginModalOpen(true);
 
-    toast({
-      title: "Agent Registered!",
-      description: `${agentName} has been registered successfully. You can now access all tabs and process the configuration.`,
-    });
+      // Store the intent to register agent after login
+      localStorage.setItem('auth-intent', 'register-agent');
 
-    // Switch to API Keys tab after registration
-    setActiveTab('api-keys');
+      return;
+    }
+
+    try {
+      // Call the registration API
+      const response = await fetch('/api/register-agent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${auth.user?.accessToken}`
+        },
+        body: JSON.stringify({
+          agentId: agentFacts.id,
+          agentName: agentName,
+          agentConfig: {
+            name: agentName,
+            type: 'custom',
+            personality,
+            instructions,
+            features,
+            agentFacts,
+            settings: {
+              creativity: creativity[0],
+              mcpServers
+            }
+          }
+        })
+      });
+
+      // Check if response is OK before trying to parse JSON
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to register agent');
+        } else {
+          // Handle non-JSON responses (like HTML error pages)
+          const errorText = await response.text();
+          console.error('Non-JSON error response:', errorText);
+          throw new Error(`Server error: ${response.status} ${response.statusText}`);
+        }
+      }
+
+      // Parse successful JSON response
+      const data = await response.json();
+
+      // Update UI state
+      setAgentRegistered(true);
+
+      toast({
+        title: "Agent Registered!",
+        description: `${agentName} has been registered successfully. You can now access all tabs and process the configuration.`,
+      });
+
+      // Switch to API Keys tab after registration
+      setActiveTab('api-keys');
+    } catch (error) {
+      console.error('Agent registration failed:', error);
+      toast({
+        title: "Registration Failed",
+        description: error instanceof Error ? error.message : "Failed to register agent",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleLoginSuccess = async () => {
+    // Automatically trigger agent registration after successful login
+    try {
+      // Call the registration API
+      const response = await fetch('/api/register-agent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${auth.user?.accessToken}`
+        },
+        body: JSON.stringify({
+          agentId: agentFacts.id,
+          agentName: agentName,
+          agentConfig: {
+            name: agentName,
+            type: 'custom',
+            personality,
+            instructions,
+            features,
+            agentFacts,
+            settings: {
+              creativity: creativity[0],
+              mcpServers
+            }
+          }
+        })
+      });
+
+      // Check if response is OK before trying to parse JSON
+      if (!response.ok) {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to register agent');
+        } else {
+          // Handle non-JSON responses (like HTML error pages)
+          const errorText = await response.text();
+          console.error('Non-JSON error response:', errorText);
+          throw new Error(`Server error: ${response.status} ${response.statusText}`);
+        }
+      }
+
+      // Parse successful JSON response
+      const data = await response.json();
+
+      // Update UI state
+      setAgentRegistered(true);
+
+      toast({
+        title: "Agent Registered!",
+        description: `${agentName} has been registered successfully. You can now access all tabs and process the configuration.`,
+      });
+
+      // Switch to API Keys tab after registration
+      setActiveTab('api-keys');
+    } catch (error) {
+      console.error('Agent registration failed:', error);
+      toast({
+        title: "Registration Failed",
+        description: error instanceof Error ? error.message : "Failed to register agent",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleDeploy = () => {
-    setAgentMinted(true);
-
-    toast({
-      title: "Agent Minted!",
-      description: `${agentName} has been minted successfully. Navigating to deployment...`,
-    });
-
-    // Clear saved progress since we're moving to the next step
-    clearSavedProgress();
+    setAgentDeployed(true);
 
     // Create the final configuration object
     const finalConfig: AgentConfiguration = {
@@ -463,6 +691,9 @@ const AgentConfig = ({
       },
       compilationData: compilationResult || undefined
     };
+
+    // Clear only configuration progress, preserve compilation data for deployment
+    clearConfigProgress();
 
     // Navigate to deploy step
     onConfigured(finalConfig);
@@ -653,7 +884,7 @@ const AgentConfig = ({
       status: string;
     }) => {
       if (sseConnected) {
-        fetch('/.netlify/functions/compile-stream', {
+        fetch('/api/compile-stream', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -767,7 +998,7 @@ const AgentConfig = ({
 
       if (sseConnected) {
         // Send process configuration request via SSE
-        fetch('/.netlify/functions/compile-stream', {
+        fetch('/api/compile-stream', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -846,7 +1077,7 @@ const AgentConfig = ({
           setConfigProcessComplete(true);
           toast({
             title: "Configuration Processing Complete",
-            description: "All configuration steps have been processed successfully. You can now mint your agent.",
+            description: "All configuration steps have been processed successfully. You can now deploy your agent.",
           });
         } else {
           // Check if the failure is compilation-related
@@ -1066,35 +1297,56 @@ const AgentConfig = ({
           <p className="text-xl text-white/70">
             Customize how your AI agent will interact with users of {connectedApp.name}
           </p>
+
+          {/* Demo Mode Indicator */}
+          {!auth.isAuthenticated && (
+            <div className="bg-amber-100 border-l-4 border-amber-500 text-amber-700 p-4 mt-4 rounded">
+              <p className="font-medium">🎯 Demo Mode</p>
+              <p className="text-sm">You're currently in demo mode. Click "Register Agent" to create an account and save your work.</p>
+            </div>
+          )}
         </div>
-        <div className="flex space-x-2">
-          <Button
-            onClick={() => setExportModalOpen(true)}
-            variant="outline"
-            className="border-white/20 text-white/70 hover:bg-white/10"
-          >
-            <Download className="h-4 w-4 mr-2" />
-            Export Config
-          </Button>
-          <Button
-            onClick={() => setImportModalOpen(true)}
-            variant="outline"
-            className="border-white/20 text-white/70 hover:bg-white/10"
-          >
-            <Upload className="h-4 w-4 mr-2" />
-            Import Config
-          </Button>
-          <Button
-            onClick={() => {
-              // Clear all saved progress including configuration and compilation state
-              clearSavedProgress();
-              window.location.reload();
-            }}
-            variant="outline"
-            className="border-white/20 text-white/70 hover:bg-white/10"
-          >
-            Clear Progress
-          </Button>
+        <div className="flex items-center space-x-4">
+          {/* Agent Header Actions for Download and Settings */}
+          <AgentHeaderActions
+            isActive={isActive}
+            downloadModalOpen={downloadModalOpen}
+            setDownloadModalOpen={setDownloadModalOpen}
+            onDownload={onDownload}
+            settingsModalOpen={settingsModalOpen}
+            setSettingsModalOpen={setSettingsModalOpen}
+          />
+          
+          {/* Config-specific actions */}
+          <div className="flex space-x-2">
+            <Button
+              onClick={() => setExportModalOpen(true)}
+              variant="outline"
+              className="border-white/20 text-white/70 hover:bg-white/10"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Export Config
+            </Button>
+            <Button
+              onClick={() => setImportModalOpen(true)}
+              variant="outline"
+              className="border-white/20 text-white/70 hover:bg-white/10"
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              Import Config
+            </Button>
+            <Button
+              onClick={() => {
+                // Clear all saved progress including configuration and compilation state
+                clearSavedProgress();
+                window.location.reload();
+              }}
+              variant="outline"
+              className="border-white/20 text-white/70 hover:bg-white/10"
+            >
+              Clear Progress
+            </Button>
+          </div>
         </div>
       </div>
       {/* The rest of the config form remains below */}
@@ -1188,9 +1440,12 @@ const AgentConfig = ({
                       <Input
                         value={agentFacts.agent_name}
                         onChange={(e) => {
-                          setAgentName(e.target.value);
-                          setAgentFacts(prev => ({ ...prev, agent_name: e.target.value }));
-                          validateField('agent_name');
+                          const newValue = e.target.value;
+                          // Update both states in a single render cycle to avoid circular dependencies
+                          setAgentName(newValue);
+                          setAgentFacts(prev => ({ ...prev, agent_name: newValue }));
+                          // Validate after state updates
+                          setTimeout(() => validateField('agent_name'), 0);
                         }}
                         className={`bg-white/10 border-white/20 text-white ${
                           validationErrors.agent_name ? 'border-red-400' : ''
@@ -1223,32 +1478,89 @@ const AgentConfig = ({
                     <label className="text-white font-medium mb-2 block">Modalities</label>
                     <Input
                       value={agentFacts.capabilities.modalities.join(', ')}
-                      onChange={(e) => setAgentFacts(prev => ({
-                        ...prev,
-                        capabilities: {
-                          ...prev.capabilities,
-                          modalities: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
-                        }
-                      }))}
-                      className="bg-white/10 border-white/20 text-white"
+                      onChange={(e) => {
+                        // Allow typing commas and spaces without immediate processing
+                        const inputValue = e.target.value;
+                        
+                        // Only process into array when we have a complete input
+                        setAgentFacts(prev => ({
+                          ...prev,
+                          capabilities: {
+                            ...prev.capabilities,
+                            // Split by comma, trim whitespace, and filter out empty strings
+                            modalities: inputValue.split(',').map(s => s.trim()).filter(Boolean)
+                          }
+                        }));
+                        
+                        // Validate after state update
+                        setTimeout(() => {
+                          const errors = validateAgentFacts({
+                            ...agentFacts,
+                            capabilities: {
+                              ...agentFacts.capabilities,
+                              modalities: inputValue.split(',').map(s => s.trim()).filter(Boolean)
+                            }
+                          });
+                          
+                          setValidationErrors(prev => ({
+                            ...prev,
+                            modalities: errors.modalities || ''
+                          }));
+                        }, 0);
+                      }}
+                      className={`bg-white/10 border-white/20 text-white ${
+                        validationErrors.modalities ? 'border-red-400' : ''
+                      }`}
                       placeholder="text, structured_data, audio, video"
                     />
+                    {validationErrors.modalities && (
+                      <p className="text-red-400 text-sm mt-1">{validationErrors.modalities}</p>
+                    )}
                   </div>
 
                   <div>
                     <label className="text-white font-medium mb-2 block">Skills</label>
                     <Input
                       value={agentFacts.capabilities.skills.join(', ')}
-                      onChange={(e) => setAgentFacts(prev => ({
-                        ...prev,
-                        capabilities: {
-                          ...prev.capabilities,
-                          skills: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
-                        }
-                      }))}
-                      className="bg-white/10 border-white/20 text-white"
+                      onChange={(e) => {
+                        // Allow typing commas and spaces without immediate processing
+                        const inputValue = e.target.value;
+                        
+                        // Only process into array when we have a complete input
+                        // This allows typing spaces and commas freely
+                        setAgentFacts(prev => ({
+                          ...prev,
+                          capabilities: {
+                            ...prev.capabilities,
+                            // Split by comma, trim whitespace, and filter out empty strings
+                            skills: inputValue.split(',').map(s => s.trim()).filter(Boolean)
+                          }
+                        }));
+                        
+                        // Validate after state update
+                        setTimeout(() => {
+                          const errors = validateAgentFacts({
+                            ...agentFacts,
+                            capabilities: {
+                              ...agentFacts.capabilities,
+                              skills: inputValue.split(',').map(s => s.trim()).filter(Boolean)
+                            }
+                          });
+                          
+                          setValidationErrors(prev => ({
+                            ...prev,
+                            skills: errors.skills || ''
+                          }));
+                        }, 0);
+                      }}
+                      className={`bg-white/10 border-white/20 text-white ${
+                        validationErrors.skills ? 'border-red-400' : ''
+                      }`}
                       placeholder="analysis, synthesis, research, automation"
                     />
+                    {validationErrors.skills && (
+                      <p className="text-red-400 text-sm mt-1">{validationErrors.skills}</p>
+                    )}
                   </div>
 
                   <div>
@@ -1256,14 +1568,34 @@ const AgentConfig = ({
                     <Input
                       value={agentFacts.endpoints.static.join(', ')}
                       onChange={(e) => {
+                        // Allow typing commas and spaces without immediate processing
+                        const inputValue = e.target.value;
+                        
+                        // Only process into array when we have a complete input
                         setAgentFacts(prev => ({
                           ...prev,
                           endpoints: {
                             ...prev.endpoints,
-                            static: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                            // Split by comma, trim whitespace, and filter out empty strings
+                            static: inputValue.split(',').map(s => s.trim()).filter(Boolean)
                           }
                         }));
-                        validateField('static_endpoints');
+                        
+                        // Validate after state update
+                        setTimeout(() => {
+                          const errors = validateAgentFacts({
+                            ...agentFacts,
+                            endpoints: {
+                              ...agentFacts.endpoints,
+                              static: inputValue.split(',').map(s => s.trim()).filter(Boolean)
+                            }
+                          });
+                          
+                          setValidationErrors(prev => ({
+                            ...prev,
+                            static_endpoints: errors.static_endpoints || ''
+                          }));
+                        }, 0);
                       }}
                       className={`bg-white/10 border-white/20 text-white ${
                         validationErrors.static_endpoints ? 'border-red-400' : ''
@@ -1298,16 +1630,23 @@ const AgentConfig = ({
                       <label className="text-white font-medium mb-2 block">Resolver Policies</label>
                       <Input
                         value={agentFacts.endpoints.adaptive_resolver.policies.join(', ')}
-                        onChange={(e) => setAgentFacts(prev => ({
-                          ...prev,
-                          endpoints: {
-                            ...prev.endpoints,
-                            adaptive_resolver: {
-                              ...prev.endpoints.adaptive_resolver,
-                              policies: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                        onChange={(e) => {
+                          // Allow typing commas and spaces without immediate processing
+                          const inputValue = e.target.value;
+                          
+                          // Only process into array when we have a complete input
+                          setAgentFacts(prev => ({
+                            ...prev,
+                            endpoints: {
+                              ...prev.endpoints,
+                              adaptive_resolver: {
+                                ...prev.endpoints.adaptive_resolver,
+                                // Split by comma, trim whitespace, and filter out empty strings
+                                policies: inputValue.split(',').map(s => s.trim()).filter(Boolean)
+                              }
                             }
-                          }
-                        }))}
+                          }));
+                        }}
                         className="bg-white/10 border-white/20 text-white"
                         placeholder="capability_negotiation, load_balancing"
                       />
@@ -1349,13 +1688,20 @@ const AgentConfig = ({
                       <label className="text-white font-medium mb-2 block">Attestations</label>
                       <Input
                         value={agentFacts.certification.attestations.join(', ')}
-                        onChange={(e) => setAgentFacts(prev => ({
-                          ...prev,
-                          certification: {
-                            ...prev.certification,
-                            attestations: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
-                          }
-                        }))}
+                        onChange={(e) => {
+                          // Allow typing commas and spaces without immediate processing
+                          const inputValue = e.target.value;
+                          
+                          // Only process into array when we have a complete input
+                          setAgentFacts(prev => ({
+                            ...prev,
+                            certification: {
+                              ...prev.certification,
+                              // Split by comma, trim whitespace, and filter out empty strings
+                              attestations: inputValue.split(',').map(s => s.trim()).filter(Boolean)
+                            }
+                          }));
+                        }}
                         className="bg-white/10 border-white/20 text-white"
                         placeholder="privacy_compliant, security_audited"
                       />
@@ -1737,7 +2083,7 @@ const AgentConfig = ({
 
                     toast({
                       title: "Configuration Complete!",
-                      description: "Your agent has been compiled successfully. You can now mint your agent.",
+                      description: "Your agent has been compiled successfully. You can now deploy your agent.",
                     });
                   } else {
                     // Handle compilation failure
@@ -1749,6 +2095,8 @@ const AgentConfig = ({
                   }
                 }}
               />
+
+              {/* Download button has been moved to the LocalDeploymentGuide component */}
             </TabsContent>
 
             <TabsContent value="test" className="space-y-6">
@@ -1818,17 +2166,6 @@ const AgentConfig = ({
                 <div className="text-green-400 text-sm">
                   ✅ Agent compiled successfully! Ready for deployment.
                 </div>
-                {compilationResult?.downloadUrl && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-green-800 text-green-400 hover:bg-green-900/30"
-                    onClick={() => window.open(compilationResult.downloadUrl, '_blank')}
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Download Plugin ({compilationResult.filename})
-                  </Button>
-                )}
               </div>
             )}
             {compileStatus === 'error' && (
@@ -1839,21 +2176,39 @@ const AgentConfig = ({
           </div>
 
           {/* Register Agent and Process Configuration Buttons */}
-          <div className="flex justify-start space-x-4 items-center">
-            {/* Register Agent Button */}
-            <Button
-              onClick={handleRegisterAgent}
-              disabled={agentRegistered}
-              className={`${
-                agentRegistered
-                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white'
-              }`}
-              size="lg"
-            >
-              <Bot className="h-5 w-5 mr-2" />
-              {agentRegistered ? 'Agent Registered' : 'Register Agent'}
-            </Button>
+          <div className="space-y-4">
+            {/* Demo Mode Notice for Registration */}
+            {!auth.isAuthenticated && !agentRegistered && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-start space-x-3">
+                  <div className="flex-shrink-0">
+                    <Bot className="h-5 w-5 text-blue-600 mt-0.5" />
+                  </div>
+                  <div>
+                    <h4 className="text-blue-900 font-medium text-sm">Ready to Register Your Agent?</h4>
+                    <p className="text-blue-700 text-sm mt-1">
+                      Create an account to save your agent configuration and access all features.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-start space-x-4 items-center">
+              {/* Register Agent Button */}
+              <Button
+                onClick={handleRegisterAgent}
+                disabled={agentRegistered}
+                className={`${
+                  agentRegistered
+                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white'
+                }`}
+                size="lg"
+              >
+                <Bot className="h-5 w-5 mr-2" />
+                {agentRegistered ? 'Agent Registered' : 'Register Agent'}
+              </Button>
 
             {/* Process Configuration Button */}
             <Button
@@ -1883,8 +2238,7 @@ const AgentConfig = ({
                 </>
               )}
             </Button>
-
-
+            </div>
           </div>
 
           {/* Processing Status - Only shown during processing */}
@@ -2029,30 +2383,30 @@ const AgentConfig = ({
                   <div className="flex items-center space-x-2">
                     <span className="text-green-400">$</span>
                     <span className="text-white/90">
-                      {agentMinted
-                        ? `${agentName.toLowerCase().replace(/\s+/g, '-')}-plugin compiled successfully`
-                        : `Waiting for agent to be minted...`}
+                      {agentDeployed
+                        ? `Preparing ${agentName.toLowerCase().replace(/\s+/g, '-')}-plugin for deployment...`
+                        : `Waiting for agent to be deployed...`}
                     </span>
-                    {!agentMinted && <span className="animate-pulse text-white/50">|</span>}
+                    {!agentDeployed && <span className="animate-pulse text-white/50">|</span>}
                   </div>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* Mint Agent Button - Now in preview panel and disabled until config processed */}
+          {/* Deploy Button - Now in preview panel and disabled until config processed */}
           <Button
             onClick={handleDeploy}
-            disabled={!configProcessComplete || agentMinted}
+            disabled={!configProcessComplete || agentDeployed}
             className={`w-full py-6 ${
-              configProcessComplete && !agentMinted
+              configProcessComplete && !agentDeployed
                 ? 'bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white'
                 : 'bg-gray-600 text-gray-400 cursor-not-allowed'
             }`}
             size="lg"
           >
             <Zap className="h-5 w-5 mr-2" />
-            {agentMinted ? 'Agent Minted' : 'Mint Agent'}
+            {agentDeployed ? 'Deploying...' : 'Deploy'}
           </Button>
         </div>
       </div>
@@ -2077,6 +2431,13 @@ const AgentConfig = ({
         mcpServers={mcpServers}
         connectedApp={connectedApp}
         configProcessComplete={configProcessComplete}
+      />
+
+      {/* Login Modal */}
+      <LoginModal
+        open={loginModalOpen}
+        onOpenChange={setLoginModalOpen}
+        onLoginSuccess={handleLoginSuccess}
       />
     </div>
   );

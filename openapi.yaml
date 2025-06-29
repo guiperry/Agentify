@@ -1,0 +1,1335 @@
+openapi: 3.1.0
+info:
+  title: Agentify API
+  description: |
+    API for the Agentify framework - a comprehensive platform for building, configuring, 
+    and deploying AI agents with enhanced developer experience.
+  version: 1.0.0
+  contact:
+    name: Agentify Support
+    url: https://agentify.example.com/support
+servers:
+  - url: https://api.agentify.example.com/v1
+    description: Production server
+  - url: https://api-staging.agentify.example.com/v1
+    description: Staging server
+  - url: http://localhost:3000/api
+    description: Local development server
+
+tags:
+  - name: Agents
+    description: Operations for managing agent configurations
+  - name: Tools
+    description: Operations for managing agent tools
+  - name: Compilation
+    description: Operations for compiling and deploying agents
+  - name: Testing
+    description: Operations for testing agents and tools
+  - name: Credentials
+    description: Operations for managing credentials
+  - name: Subagents
+    description: Operations for managing subagents
+
+paths:
+  /agents:
+    get:
+      summary: List all agents
+      description: Returns a list of all agent configurations
+      operationId: listAgents
+      tags:
+        - Agents
+      responses:
+        '200':
+          description: A list of agent configurations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentSummary'
+    post:
+      summary: Create a new agent
+      description: Creates a new agent configuration
+      operationId: createAgent
+      tags:
+        - Agents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentPluginConfig'
+      responses:
+        '201':
+          description: Agent created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPluginConfig'
+        '400':
+          description: Invalid agent configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/{agentId}:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the agent
+    get:
+      summary: Get agent details
+      description: Returns the details of a specific agent
+      operationId: getAgent
+      tags:
+        - Agents
+      responses:
+        '200':
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPluginConfig'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Update agent
+      description: Updates an existing agent configuration
+      operationId: updateAgent
+      tags:
+        - Agents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentPluginConfig'
+      responses:
+        '200':
+          description: Agent updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentPluginConfig'
+        '400':
+          description: Invalid agent configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete agent
+      description: Deletes an agent configuration
+      operationId: deleteAgent
+      tags:
+        - Agents
+      responses:
+        '204':
+          description: Agent deleted successfully
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/{agentId}/compile:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the agent
+    post:
+      summary: Compile agent
+      description: Compiles an agent configuration into a deployable plugin
+      operationId: compileAgent
+      tags:
+        - Compilation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                buildTarget:
+                  type: string
+                  enum: [wasm, go]
+                  description: The build target for the agent
+                  default: wasm
+                outputFormat:
+                  type: string
+                  enum: [plugin, library, standalone]
+                  description: The output format for the compiled agent
+                  default: plugin
+      responses:
+        '202':
+          description: Compilation started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  compilationId:
+                    type: string
+                    description: The ID of the compilation job
+                  status:
+                    type: string
+                    enum: [queued, in_progress]
+                    description: The status of the compilation job
+        '400':
+          description: Invalid compilation request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/{agentId}/compile/{compilationId}:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the agent
+      - name: compilationId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the compilation job
+    get:
+      summary: Get compilation status
+      description: Returns the status of a compilation job
+      operationId: getCompilationStatus
+      tags:
+        - Compilation
+      responses:
+        '200':
+          description: Compilation status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  compilationId:
+                    type: string
+                    description: The ID of the compilation job
+                  status:
+                    type: string
+                    enum: [queued, in_progress, completed, failed]
+                    description: The status of the compilation job
+                  progress:
+                    type: number
+                    format: float
+                    minimum: 0
+                    maximum: 1
+                    description: The progress of the compilation job (0-1)
+                  logs:
+                    type: array
+                    items:
+                      type: string
+                    description: Compilation logs
+                  downloadUrl:
+                    type: string
+                    format: uri
+                    description: URL to download the compiled plugin (if completed)
+        '404':
+          description: Compilation job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/{agentId}/download:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the agent
+      - name: platform
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [windows, mac, linux, all]
+          default: all
+        description: The target platform for the download
+    get:
+      summary: Download compiled agent
+      description: Downloads the compiled agent plugin for the specified platform
+      operationId: downloadAgent
+      tags:
+        - Compilation
+      responses:
+        '200':
+          description: Agent plugin binary
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Compiled agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/{agentId}/tools:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the agent
+    get:
+      summary: List agent tools
+      description: Returns a list of tools configured for the agent
+      operationId: listAgentTools
+      tags:
+        - Tools
+      responses:
+        '200':
+          description: A list of tools
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ToolConfig'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      summary: Add tool to agent
+      description: Adds a new tool to an agent configuration
+      operationId: addAgentTool
+      tags:
+        - Tools
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolConfig'
+      responses:
+        '201':
+          description: Tool added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolConfig'
+        '400':
+          description: Invalid tool configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/{agentId}/tools/{toolName}:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the agent
+      - name: toolName
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The name of the tool
+    get:
+      summary: Get tool details
+      description: Returns the details of a specific tool
+      operationId: getAgentTool
+      tags:
+        - Tools
+      responses:
+        '200':
+          description: Tool details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolConfig'
+        '404':
+          description: Tool or agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Update tool
+      description: Updates an existing tool configuration
+      operationId: updateAgentTool
+      tags:
+        - Tools
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolConfig'
+      responses:
+        '200':
+          description: Tool updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolConfig'
+        '400':
+          description: Invalid tool configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Tool or agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete tool
+      description: Deletes a tool from an agent configuration
+      operationId: deleteAgentTool
+      tags:
+        - Tools
+      responses:
+        '204':
+          description: Tool deleted successfully
+        '404':
+          description: Tool or agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/{agentId}/tools/{toolName}/test:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the agent
+      - name: toolName
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The name of the tool
+    post:
+      summary: Test tool
+      description: Tests a tool with the provided parameters
+      operationId: testAgentTool
+      tags:
+        - Testing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Tool parameters for testing
+      responses:
+        '200':
+          description: Tool test results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    description: The result of the tool execution
+                  executionTime:
+                    type: number
+                    format: float
+                    description: The execution time in milliseconds
+                  logs:
+                    type: array
+                    items:
+                      type: string
+                    description: Execution logs
+        '400':
+          description: Invalid test parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Tool or agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/{agentId}/subagents:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the agent
+    get:
+      summary: List subagents
+      description: Returns a list of subagents configured for the agent
+      operationId: listSubagents
+      tags:
+        - Subagents
+      responses:
+        '200':
+          description: A list of subagents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubagentConfig'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      summary: Add subagent
+      description: Adds a new subagent to an agent configuration
+      operationId: addSubagent
+      tags:
+        - Subagents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubagentConfig'
+      responses:
+        '201':
+          description: Subagent added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubagentConfig'
+        '400':
+          description: Invalid subagent configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/{agentId}/subagents/{subagentId}:
+    parameters:
+      - name: agentId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the agent
+      - name: subagentId
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The ID of the subagent
+    get:
+      summary: Get subagent details
+      description: Returns the details of a specific subagent
+      operationId: getSubagent
+      tags:
+        - Subagents
+      responses:
+        '200':
+          description: Subagent details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubagentConfig'
+        '404':
+          description: Subagent or agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Update subagent
+      description: Updates an existing subagent configuration
+      operationId: updateSubagent
+      tags:
+        - Subagents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubagentConfig'
+      responses:
+        '200':
+          description: Subagent updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubagentConfig'
+        '400':
+          description: Invalid subagent configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Subagent or agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete subagent
+      description: Deletes a subagent from an agent configuration
+      operationId: deleteSubagent
+      tags:
+        - Subagents
+      responses:
+        '204':
+          description: Subagent deleted successfully
+        '404':
+          description: Subagent or agent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /credentials:
+    get:
+      summary: List credentials
+      description: Returns a list of all credentials
+      operationId: listCredentials
+      tags:
+        - Credentials
+      responses:
+        '200':
+          description: A list of credentials
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CredentialInfo'
+    post:
+      summary: Add credential
+      description: Adds a new credential
+      operationId: addCredential
+      tags:
+        - Credentials
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credential'
+      responses:
+        '201':
+          description: Credential added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialInfo'
+        '400':
+          description: Invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /credentials/{credentialName}:
+    parameters:
+      - name: credentialName
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The name of the credential
+    get:
+      summary: Get credential info
+      description: Returns information about a specific credential (without the value)
+      operationId: getCredentialInfo
+      tags:
+        - Credentials
+      responses:
+        '200':
+          description: Credential info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialInfo'
+        '404':
+          description: Credential not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Update credential
+      description: Updates an existing credential
+      operationId: updateCredential
+      tags:
+        - Credentials
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Credential'
+      responses:
+        '200':
+          description: Credential updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialInfo'
+        '400':
+          description: Invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Credential not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete credential
+      description: Deletes a credential
+      operationId: deleteCredential
+      tags:
+        - Credentials
+      responses:
+        '204':
+          description: Credential deleted successfully
+        '404':
+          description: Credential not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /llm/test:
+    post:
+      summary: Test LLM integration
+      description: Tests the LLM integration with the provided configuration
+      operationId: testLLM
+      tags:
+        - Testing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelProviderConfig'
+      responses:
+        '200':
+          description: LLM test results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: string
+                    description: The result of the LLM test
+                  executionTime:
+                    type: number
+                    format: float
+                    description: The execution time in milliseconds
+                  tokenUsage:
+                    type: object
+                    properties:
+                      input:
+                        type: integer
+                        description: Input tokens used
+                      output:
+                        type: integer
+                        description: Output tokens used
+                      total:
+                        type: integer
+                        description: Total tokens used
+        '400':
+          description: Invalid LLM configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    AgentSummary:
+      type: object
+      required:
+        - agent_id
+        - agent_name
+        - agentType
+        - description
+        - version
+      properties:
+        agent_id:
+          type: string
+          description: W3C DID Core compliant globally unique decentralized identifier
+        agent_name:
+          type: string
+          description: Human-readable alias encoded as a URN
+        agentType:
+          type: string
+          enum: [llm, sequential, parallel, loop]
+          description: Agent type classification
+        description:
+          type: string
+          description: Human-readable description
+        version:
+          type: string
+          description: Version information
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp
+        updated_at:
+          type: string
+          format: date-time
+          description: Last update timestamp
+
+    AgentPluginConfig:
+      type: object
+      required:
+        - agent_id
+        - agent_name
+        - agentType
+        - description
+        - version
+        - facts_url
+        - ttl
+        - signature
+        - tools
+        - resources
+        - prompts
+        - pythonDependencies
+        - useChromemGo
+        - subAgentCapabilities
+        - trustedExecutionEnvironment
+      properties:
+        agent_id:
+          type: string
+          description: W3C DID Core compliant globally unique decentralized identifier
+        agent_name:
+          type: string
+          description: Human-readable alias encoded as a URN
+        agentType:
+          type: string
+          enum: [llm, sequential, parallel, loop]
+          description: Agent type classification
+        description:
+          type: string
+          description: Human-readable description
+        version:
+          type: string
+          description: Version information
+        facts_url:
+          type: string
+          format: uri
+          description: Reference to the AgentFacts hosted at the agent's domain
+        private_facts_url:
+          type: string
+          format: uri
+          description: Optional privacy-enhanced reference to AgentFacts
+        adaptive_router_url:
+          type: string
+          format: uri
+          description: Optional endpoint for dynamic routing services
+        ttl:
+          type: integer
+          description: Maximum cache duration before client must re-resolve the record (in seconds)
+        signature:
+          type: string
+          description: Cryptographic signature from registry resolver
+        buildTarget:
+          type: string
+          enum: [wasm, go]
+          description: Build target for compilation
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolConfig'
+          description: Tool configurations
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceConfig'
+          description: Resource configurations
+        prompts:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptConfig'
+          description: Prompt configurations
+        pythonDependencies:
+          type: array
+          items:
+            type: string
+          description: Python dependencies
+        useChromemGo:
+          type: boolean
+          description: Whether to use chromem-go for persistence
+        subAgentCapabilities:
+          type: boolean
+          description: Whether the agent can spawn sub-agents
+        trustedExecutionEnvironment:
+          $ref: '#/components/schemas/TEEConfig'
+          description: TEE configuration
+        terminalUI:
+          $ref: '#/components/schemas/TerminalUIConfig'
+          description: Terminal UI configuration
+        modelProvider:
+          $ref: '#/components/schemas/ModelProviderConfig'
+          description: Model provider configuration
+        requiredCredentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequiredCredential'
+          description: Required credentials
+        subagents:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubagentConfig'
+          description: Subagent configurations
+        subagentManagement:
+          $ref: '#/components/schemas/SubagentManagementUIConfig'
+          description: Subagent management configuration
+
+    ToolConfig:
+      type: object
+      required:
+        - name
+        - description
+        - parameters
+        - returnType
+        - sourceType
+        - sourceValue
+      properties:
+        name:
+          type: string
+          description: The name of the tool
+        description:
+          type: string
+          description: A description of what the tool does
+        parameters:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParameterConfig'
+          description: The parameters for the tool
+        returnType:
+          type: string
+          description: The return type of the tool
+        sourceType:
+          type: string
+          enum: [inlineBody, filePath]
+          description: The type of source for the tool implementation
+        sourceValue:
+          type: string
+          description: The implementation body or path to file
+
+    ParameterConfig:
+      type: object
+      required:
+        - name
+        - description
+        - type
+        - required
+      properties:
+        name:
+          type: string
+          description: The name of the parameter
+        description:
+          type: string
+          description: A description of the parameter
+        type:
+          type: string
+          enum: [string, number, boolean, object, array]
+          description: The type of the parameter
+        required:
+          type: boolean
+          description: Whether the parameter is required
+        defaultValue:
+          type: object
+          nullable: true
+          description: The default value for the parameter
+        schema:
+          type: object
+          properties:
+            properties:
+              type: object
+              additionalProperties:
+                $ref: '#/components/schemas/ParameterConfig'
+              description: For object types
+            items:
+              $ref: '#/components/schemas/ParameterConfig'
+              description: For array types
+            enum:
+              type: array
+              items:
+                type: string
+              description: For string types
+            pattern:
+              type: string
+              description: For string types
+            minimum:
+              type: number
+              description: For number types
+            maximum:
+              type: number
+              description: For number types
+          description: Additional schema information for the parameter
+
+    ResourceConfig:
+      type: object
+      required:
+        - name
+        - type
+        - content
+        - isEmbedded
+      properties:
+        name:
+          type: string
+          description: The name of the resource
+        type:
+          type: string
+          enum: [text, binary, json]
+          description: The type of the resource
+        content:
+          type: string
+          description: The content of the resource
+        isEmbedded:
+          type: boolean
+          description: Whether the resource is embedded in the agent
+
+    PromptConfig:
+      type: object
+      required:
+        - name
+        - content
+        - variables
+      properties:
+        name:
+          type: string
+          description: The name of the prompt
+        content:
+          type: string
+          description: The content of the prompt
+        variables:
+          type: array
+          items:
+            type: string
+          description: The variables in the prompt
+
+    TEEConfig:
+      type: object
+      required:
+        - isolationLevel
+        - resourceLimits
+        - networkAccess
+        - fileSystemAccess
+      properties:
+        isolationLevel:
+          type: string
+          enum: [process, container, vm]
+          description: The isolation level for the trusted execution environment
+        resourceLimits:
+          type: object
+          required:
+            - memory
+            - cpu
+            - timeLimit
+          properties:
+            memory:
+              type: integer
+              description: Memory limit in MB
+            cpu:
+              type: number
+              description: CPU limit in cores
+            timeLimit:
+              type: integer
+              description: Time limit in seconds
+          description: Resource limits for the trusted execution environment
+        networkAccess:
+          type: boolean
+          description: Whether the agent has network access
+        fileSystemAccess:
+          type: boolean
+          description: Whether the agent has file system access
+
+    TerminalUIConfig:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+          description: Whether the terminal UI is enabled
+        defaultHeight:
+          type: integer
+          description: The default height of the terminal UI
+        theme:
+          type: string
+          enum: [light, dark, system]
+          description: The theme for the terminal UI
+        allowCommandHistory:
+          type: boolean
+          description: Whether to allow command history
+        supportedCommands:
+          type: array
+          items:
+            type: string
+          description: The supported commands for the terminal UI
+
+    ModelProviderConfig:
+      type: object
+      required:
+        - provider
+        - model
+      properties:
+        provider:
+          type: string
+          enum: [openai, anthropic, google, cerebras, custom]
+          description: The LLM provider
+        model:
+          type: string
+          description: The model to use
+        parameters:
+          type: object
+          properties:
+            temperature:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: The temperature parameter for the model
+            topP:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: The top-p parameter for the model
+            maxTokens:
+              type: integer
+              description: The maximum number of tokens to generate
+          additionalProperties: true
+          description: Additional parameters for the model
+
+    RequiredCredential:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: The name of the credential
+        description:
+          type: string
+          description: A description of the credential
+        optional:
+          type: boolean
+          description: Whether the credential is optional
+        envVarName:
+          type: string
+          description: The environment variable name to look for
+
+    SubagentConfig:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - language
+        - initScript
+        - environmentVariables
+        - tools
+      properties:
+        id:
+          type: string
+          description: The ID of the subagent
+        name:
+          type: string
+          description: The name of the subagent
+        description:
+          type: string
+          description: A description of the subagent
+        language:
+          type: string
+          enum: [python, javascript]
+          description: The language of the subagent
+        initScript:
+          type: string
+          description: The initialization script for the subagent
+        environmentVariables:
+          type: object
+          additionalProperties:
+            type: string
+          description: Environment variables for the subagent
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolConfig'
+          description: Tools for the subagent
+        modelProvider:
+          $ref: '#/components/schemas/ModelProviderConfig'
+          description: Model provider configuration for the subagent
+        resourceLimits:
+          type: object
+          properties:
+            maxMemoryMB:
+              type: integer
+              description: Maximum memory usage in MB
+            maxCPUPercent:
+              type: number
+              description: Maximum CPU usage as a percentage
+            timeoutSeconds:
+              type: integer
+              description: Timeout in seconds
+          description: Resource limits for the subagent
+
+    SubagentManagementUIConfig:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+          description: Whether subagent management is enabled
+        allowDynamicCreation:
+          type: boolean
+          description: Whether to allow dynamic creation of subagents
+        maxSubagents:
+          type: integer
+          description: The maximum number of subagents
+        resourceLimits:
+          type: object
+          properties:
+            maxMemoryMB:
+              type: integer
+              description: Maximum memory usage in MB
+            maxCPUPercent:
+              type: number
+              description: Maximum CPU usage as a percentage
+            timeoutSeconds:
+              type: integer
+              description: Timeout in seconds
+          description: Resource limits for subagents
+
+    Credential:
+      type: object
+      required:
+        - name
+        - value
+      properties:
+        name:
+          type: string
+          description: The name of the credential
+        value:
+          type: string
+          description: The value of the credential
+        description:
+          type: string
+          description: A description of the credential
+
+    CredentialInfo:
+      type: object
+      required:
+        - name
+        - createdAt
+      properties:
+        name:
+          type: string
+          description: The name of the credential
+        description:
+          type: string
+          description: A description of the credential
+        createdAt:
+          type: string
+          format: date-time
+          description: When the credential was created
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the credential was last updated
+
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Error code
+        message:
+          type: string
+          description: Error message
+        details:
+          type: object
+          description: Additional error details
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token for authentication
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+
+security:
+  - bearerAuth: []
+  - apiKeyAuth: []

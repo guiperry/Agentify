@@ -91,12 +91,24 @@ export function useSSE(options: UseSSEOptions = {}) {
 
   // Auto-connect on mount when user is authenticated
   useEffect(() => {
+    let hasConnected = false;
+    
     if (autoConnect && user?.accessToken) {
+      console.log('useSSE: Auto-connecting with auth token');
       sseManager.current.connect(user.accessToken);
+      hasConnected = true;
     }
 
     return () => {
+      console.log('useSSE: Component unmounting, cleaning up SSE connection');
+      // Always call cleanup on unmount to ensure proper resource management
       sseManager.current.cleanup();
+      
+      // If this component initiated the connection, explicitly disconnect
+      if (hasConnected) {
+        console.log('useSSE: Explicitly disconnecting SSE connection initiated by this component');
+        sseManager.current.disconnect();
+      }
     };
   }, [autoConnect, user?.accessToken]);
 

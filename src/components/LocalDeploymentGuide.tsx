@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,11 +23,22 @@ interface LocalDeploymentGuideProps {
   agentName: string;
   platform: 'windows' | 'mac' | 'linux';
   onDownload: (platform: 'windows' | 'mac' | 'linux') => void;
+  compiledPluginUrl?: string;
+  onPlatformChange?: (platform: 'windows' | 'mac' | 'linux') => void;
 }
 
-const LocalDeploymentGuide = ({ agentName, platform, onDownload }: LocalDeploymentGuideProps) => {
+const LocalDeploymentGuide = ({ agentName, platform: initialPlatform, onDownload, compiledPluginUrl, onPlatformChange }: LocalDeploymentGuideProps) => {
   const [activeStep, setActiveStep] = useState(0);
+  const [platform, setPlatform] = useState<'windows' | 'mac' | 'linux'>(initialPlatform);
   const { toast } = useToast();
+  
+  // Update parent component when platform changes
+  useEffect(() => {
+    if (platform !== initialPlatform && onPlatformChange) {
+      // This will update the parent's state without triggering a download
+      onPlatformChange(platform);
+    }
+  }, [platform, initialPlatform, onPlatformChange]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -97,8 +108,8 @@ const LocalDeploymentGuide = ({ agentName, platform, onDownload }: LocalDeployme
             <div className="flex items-center space-x-3 mb-3">
               <span className="text-2xl">{config.icon}</span>
               <div>
-                <h4 className="text-white font-medium">{config.name} Package</h4>
-                <p className="text-white/70 text-sm">Includes agent runtime and your compiled plugin</p>
+                <h4 className="text-white font-medium">{config.name} Engine</h4>
+                <p className="text-white/70 text-sm">Download the Agentic Engine runtime for your platform</p>
               </div>
             </div>
             <Button
@@ -106,7 +117,62 @@ const LocalDeploymentGuide = ({ agentName, platform, onDownload }: LocalDeployme
               className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600"
             >
               <Download className="h-4 w-4 mr-2" />
-              Download for {config.name}
+              Download Engine for {config.name}
+            </Button>
+          </div>
+          
+          <div className="bg-white/10 rounded-lg p-4 mt-4">
+            <div className="flex items-center space-x-3 mb-3">
+              <span className="text-2xl">🧩</span>
+              <div>
+                <h4 className="text-white font-medium">Agent Plugin</h4>
+                <p className="text-white/70 text-sm">Download your compiled agent plugin separately</p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              className="w-full border-green-800 text-green-400 hover:bg-green-900/30"
+              onClick={() => {
+                if (compiledPluginUrl) {
+                  // Use the directly passed compiledPluginUrl
+                  window.open(compiledPluginUrl, '_blank');
+                  toast({
+                    title: "Downloading Plugin",
+                    description: `Downloading ${agentName} plugin for ${platform}`,
+                  });
+                } else {
+                  // Try to get from localStorage as fallback
+                  const agentId = agentName.replace(/\s+/g, '-').toLowerCase();
+                  const savedCompilationState = localStorage.getItem(`compilation-state-${agentId}`);
+                  
+                  if (savedCompilationState) {
+                    try {
+                      const parsed = JSON.parse(savedCompilationState);
+                      if (parsed.success && parsed.result && parsed.result.downloadUrl) {
+                        window.open(parsed.result.downloadUrl, '_blank');
+                        toast({
+                          title: "Downloading Plugin",
+                          description: `Downloading ${agentName} plugin for ${platform}`,
+                        });
+                        return;
+                      }
+                    } catch (error) {
+                      console.error("Error parsing saved compilation state:", error);
+                    }
+                  }
+                  
+                  // If all else fails, show error
+                  toast({
+                    title: "Download Failed",
+                    description: "Could not find compiled plugin. Please go back and compile your agent first.",
+                    variant: "destructive"
+                  });
+                }
+              }}
+              disabled={!compiledPluginUrl}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download Plugin
             </Button>
           </div>
 
@@ -186,6 +252,29 @@ const LocalDeploymentGuide = ({ agentName, platform, onDownload }: LocalDeployme
                   </div>
                 </div>
               )}
+            </div>
+            
+            <div>
+              <h5 className="text-white font-medium mb-2">4. Extract the plugin to plugins directory</h5>
+              <div className="bg-gray-900 rounded-lg p-3 font-mono text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-green-400">
+                    {platform === 'windows'
+                      ? 'Extract plugin.zip to ' + config.pluginsPath
+                      : 'unzip plugin.zip -d ' + config.pluginsPath
+                    }
+                  </span>
+                  {platform !== 'windows' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyToClipboard(`unzip plugin.zip -d ${config.pluginsPath}`)}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -308,6 +397,37 @@ const LocalDeploymentGuide = ({ agentName, platform, onDownload }: LocalDeployme
         <p className="text-white/70">
           Step-by-step instructions for deploying {agentName} locally on {config.name}
         </p>
+        <p className="text-white/70 mt-2">
+          <span className="text-yellow-400">Note:</span> You'll need to download both the Agent Plugin and the Agentic Engine separately.
+        </p>
+        
+        {/* Platform Selection */}
+        <div className="flex justify-center space-x-2 mt-4">
+          <Button
+            onClick={() => setPlatform('windows')}
+            variant={platform === 'windows' ? 'default' : 'outline'}
+            size="sm"
+            className={platform === 'windows' ? 'bg-blue-600 hover:bg-blue-700' : 'border-white/20 text-white/70'}
+          >
+            Windows
+          </Button>
+          <Button
+            onClick={() => setPlatform('mac')}
+            variant={platform === 'mac' ? 'default' : 'outline'}
+            size="sm"
+            className={platform === 'mac' ? 'bg-gray-600 hover:bg-gray-700' : 'border-white/20 text-white/70'}
+          >
+            macOS
+          </Button>
+          <Button
+            onClick={() => setPlatform('linux')}
+            variant={platform === 'linux' ? 'default' : 'outline'}
+            size="sm"
+            className={platform === 'linux' ? 'bg-orange-600 hover:bg-orange-700' : 'border-white/20 text-white/70'}
+          >
+            Linux
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center justify-between mb-8">

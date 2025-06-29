@@ -29,8 +29,15 @@ export async function GET(
 
     // Get compilation status to get download URL
     const status = await githubCompiler.getCompilationStatus(jobId);
+    
+    console.log(`📊 Compilation status for job ${jobId}:`, {
+      status: status.status,
+      hasDownloadUrl: !!status.downloadUrl,
+      hasRawDownloadUrl: !!status.rawDownloadUrl
+    });
 
     if (status.status !== 'completed' || !status.rawDownloadUrl) {
+      console.error(`❌ Cannot download artifact: status=${status.status}, rawDownloadUrl=${status.rawDownloadUrl ? 'present' : 'missing'}`);
       return NextResponse.json(
         { error: 'Compilation not completed or download URL not available' },
         { status: 404 }
@@ -40,16 +47,34 @@ export async function GET(
     console.log(`📥 Downloading artifact from: ${status.rawDownloadUrl}`);
 
     // Download the artifact zip file directly from GitHub
-    const response = await fetch(status.rawDownloadUrl, {
-      headers: {
-        'Authorization': `token ${process.env.GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'next-agentify'
-      }
-    });
+    console.log(`🔑 Using GitHub token: ${process.env.GITHUB_TOKEN ? 'present (length: ' + process.env.GITHUB_TOKEN.length + ')' : 'missing'}`);
+    
+    let response;
+    try {
+      response = await fetch(status.rawDownloadUrl, {
+        headers: {
+          'Authorization': `token ${process.env.GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'next-agentify'
+        }
+      });
 
-    if (!response.ok) {
-      throw new Error(`Failed to download artifact: ${response.statusText}`);
+      console.log(`📡 GitHub API response status: ${response.status} ${response.statusText}`);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to download artifact: ${response.status} ${response.statusText}`);
+      }
+      
+      // Check if we have the expected content type
+      const contentType = response.headers.get('content-type');
+      console.log(`📦 Response content type: ${contentType}`);
+      
+      if (!contentType || (!contentType.includes('application/zip') && !contentType.includes('application/octet-stream'))) {
+        console.warn(`⚠️ Unexpected content type: ${contentType}`);
+      }
+    } catch (fetchError) {
+      console.error('🔥 Fetch error:', fetchError);
+      throw new Error(`Failed to download artifact: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
     }
 
     // Get the zip file as a buffer
@@ -60,7 +85,16 @@ export async function GET(
     // Return the entire zip file for download
     const downloadResponse = new NextResponse(zipBuffer);
     downloadResponse.headers.set('Content-Type', 'application/zip');
-    downloadResponse.headers.set('Content-Disposition', `attachment; filename="agent-plugin-${jobId}.zip"`);
+    
+    // Get the agent name from the status if available
+    const agentName = status.agentName || 'agent';
+    const sanitizedAgentName = agentName !== 'agent' ? 
+      agentName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase() : 
+      `agent-${jobId.split('-')[1]}`;
+    
+    // Set the filename to include the agent name and jobId
+    downloadResponse.headers.set('Content-Disposition', `attachment; filename="${sanitizedAgentName}-plugin-${jobId}.zip"`);
+    
     downloadResponse.headers.set('Content-Length', zipBuffer.length.toString());
     downloadResponse.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
 

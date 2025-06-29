@@ -16,40 +16,146 @@ import { Eye, EyeOff, Mail, Lock } from "lucide-react";
 import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google';
 import { useAuth } from '@/contexts/AuthContext';
 import { GOOGLE_CLIENT_ID } from '@/utils/env';
+import { useToast } from "@/hooks/use-toast";
 
 interface LoginModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onLoginSuccess?: () => void;
 }
 
-const LoginModal = ({ open, onOpenChange }: LoginModalProps) => {
+const LoginModal = ({ open, onOpenChange, onLoginSuccess }: LoginModalProps) => {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { handleGoogleLoginSuccess, handleGoogleLoginError } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const { handleGoogleLoginSuccess, handleGoogleLoginError, signInWithEmail, signUpWithEmail } = useAuth();
+  const { toast } = useToast();
 
   // Get Google Client ID from environment
   const googleClientId = GOOGLE_CLIENT_ID;
 
-  const handleLogin = () => {
-    console.log('Login attempt:', { email, password });
-    // In a real app, this would handle authentication
-    onOpenChange(false);
+  const handleLogin = async () => {
+    if (!email || !password) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter both email and password",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await signInWithEmail(email, password);
+      onOpenChange(false);
+
+      // Check if there was an intent to register agent
+      const authIntent = localStorage.getItem('auth-intent');
+      if (authIntent === 'register-agent') {
+        localStorage.removeItem('auth-intent');
+        // Trigger any callback provided by parent component
+        if (onLoginSuccess) {
+          onLoginSuccess();
+        }
+      }
+
+      toast({
+        title: "Login Successful",
+        description: "Welcome back to Agentify!",
+      });
+    } catch (error) {
+      console.error('Login failed:', error);
+      toast({
+        title: "Login Failed",
+        description: error instanceof Error ? error.message : "Please check your credentials and try again",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleSignUp = () => {
-    console.log('Sign up attempt:', { email, password });
-    // In a real app, this would handle registration
-    onOpenChange(false);
+  const handleSignUp = async () => {
+    if (!email || !password) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter both email and password",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (password.length < 6) {
+      toast({
+        title: "Validation Error",
+        description: "Password must be at least 6 characters long",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await signUpWithEmail(email, password);
+      onOpenChange(false);
+
+      // Check if there was an intent to register agent
+      const authIntent = localStorage.getItem('auth-intent');
+      if (authIntent === 'register-agent') {
+        localStorage.removeItem('auth-intent');
+        // Trigger any callback provided by parent component
+        if (onLoginSuccess) {
+          onLoginSuccess();
+        }
+      }
+
+      toast({
+        title: "Account Created",
+        description: "Welcome to Agentify! Please check your email to verify your account.",
+      });
+    } catch (error) {
+      console.error('Sign up failed:', error);
+      toast({
+        title: "Sign Up Failed",
+        description: error instanceof Error ? error.message : "Please check your information and try again",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Handle successful Google login
   const onGoogleLoginSuccess = async (credentialResponse: any) => {
+    setIsLoading(true);
     try {
       await handleGoogleLoginSuccess(credentialResponse);
       onOpenChange(false); // Close modal on successful login
+
+      // Check if there was an intent to register agent
+      const authIntent = localStorage.getItem('auth-intent');
+      if (authIntent === 'register-agent') {
+        localStorage.removeItem('auth-intent');
+        // Trigger any callback provided by parent component
+        if (onLoginSuccess) {
+          onLoginSuccess();
+        }
+      }
+
+      toast({
+        title: "Login Successful",
+        description: "Welcome to Agentify!",
+      });
     } catch (error) {
       console.error('Google login failed:', error);
+      toast({
+        title: "Google Login Failed",
+        description: error instanceof Error ? error.message : "Google login failed. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -57,6 +163,11 @@ const LoginModal = ({ open, onOpenChange }: LoginModalProps) => {
   const onGoogleLoginError = () => {
     console.error('Google login error');
     handleGoogleLoginError();
+    toast({
+      title: "Google Login Error",
+      description: "Google login failed. Please try again.",
+      variant: "destructive"
+    });
   };
 
   return (
@@ -118,11 +229,12 @@ const LoginModal = ({ open, onOpenChange }: LoginModalProps) => {
                   </Button>
                 </div>
               </div>
-              <Button 
+              <Button
                 onClick={handleLogin}
-                className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+                disabled={isLoading}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
               >
-                Sign In
+                {isLoading ? "Signing In..." : "Sign In"}
               </Button>
               <Button
                 variant="ghost"
@@ -212,11 +324,12 @@ const LoginModal = ({ open, onOpenChange }: LoginModalProps) => {
                   </Button>
                 </div>
               </div>
-              <Button 
+              <Button
                 onClick={handleSignUp}
-                className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+                disabled={isLoading}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50"
               >
-                Create Account
+                {isLoading ? "Creating Account..." : "Create Account"}
               </Button>
               <p className="text-xs text-white/50 text-center">
                 By signing up, you agree to our Terms of Service and Privacy Policy

@@ -10,6 +10,7 @@ interface GitHubActionsCompilerOptions {
 
 interface CompilationJob {
   id: string;
+  agentName?: string;
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
   downloadUrl?: string;
   rawDownloadUrl?: string;
@@ -38,9 +39,18 @@ export class GitHubActionsCompiler {
   async triggerCompilation(config: AgentPluginConfig): Promise<string> {
     try {
       // Create a unique job ID
-      const jobId = `compile-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-      console.log(`🚀 Triggering GitHub Actions compilation with job ID: ${jobId}`);
+      const jobId = `compile-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+      
+      // Get a sanitized agent name for use in workflow names
+      // Extract just the agent name from URN format if present (e.g., "urn:agent:agentify:seal-assist" -> "seal-assist")
+      let agentName = config.agent_name || 'unnamed-agent';
+      if (agentName.startsWith('urn:agent:')) {
+        const parts = agentName.split(':');
+        agentName = parts[parts.length - 1]; // Get the last part after the last colon
+      }
+      agentName = agentName.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
+      
+      console.log(`🚀 Triggering GitHub Actions compilation for "${agentName}" with job ID: ${jobId}`);
 
       // Trigger the workflow
       const response = await this.octokit.actions.createWorkflowDispatch({
@@ -50,6 +60,7 @@ export class GitHubActionsCompiler {
         ref: 'main',
         inputs: {
           job_id: jobId,
+          agent_name: agentName,
           config: JSON.stringify(config),
           build_target: config.buildTarget || 'wasm',
           platform: process.env.GOOS || 'linux'
@@ -143,8 +154,48 @@ export class GitHubActionsCompiler {
           status = 'pending';
       }
 
+      // Extract agent name from run name if possible
+      let agentName = 'agent';
+      if (targetRun.name) {
+        // Try to extract agent name from "Compile {agent_name} - Job {job_id}"
+        const nameMatch = targetRun.name.match(/^Compile\s+([^-]+)\s+-\s+Job/);
+        if (nameMatch && nameMatch[1]) {
+          agentName = nameMatch[1].trim();
+        }
+      }
+      
+      // If the agent name is "Agent Plugin", it's the default name from the workflow
+      // In this case, try to extract the agent name from the config
+      if (agentName === 'Agent Plugin') {
+        try {
+          // Try to parse the config from the workflow inputs
+          const runJobs = await this.octokit.actions.listJobsForWorkflowRun({
+            owner: this.owner,
+            repo: this.repo,
+            run_id: targetRun.id
+          });
+          
+          // Check if we have any jobs with steps that have inputs
+          for (const job of runJobs.data.jobs) {
+            if (job.steps) {
+              for (const step of job.steps) {
+                if (step.name === 'Parse configuration' && step.conclusion === 'success') {
+                  // We found the configuration parsing step, try to extract the agent name from the config
+                  console.log(`🔍 Found configuration parsing step in job ${job.name}`);
+                  agentName = `agent-${jobId.split('-')[1]}`;
+                  break;
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching job details:', error);
+        }
+      }
+      
       const result: CompilationJob = {
         id: jobId,
+        agentName,
         status
       };
 
@@ -157,16 +208,50 @@ export class GitHubActionsCompiler {
             run_id: targetRun.id
           });
 
-          const pluginArtifact = artifacts.data.artifacts.find(artifact =>
-            artifact.name.includes('plugin') || artifact.name.includes(jobId)
+          console.log(`📦 Found ${artifacts.data.artifacts.length} artifacts for run ${targetRun.id}`);
+          
+          // Log all artifacts for debugging
+          artifacts.data.artifacts.forEach(artifact => {
+            console.log(`  - Artifact: ${artifact.name} (${artifact.id}), size: ${artifact.size_in_bytes} bytes`);
+          });
+
+          // Try to find the artifact with multiple strategies
+          let pluginArtifact = artifacts.data.artifacts.find(artifact => 
+            // First try: includes jobId (most specific)
+            artifact.name.includes(jobId)
           );
+          
+          // If not found, try more generic matching
+          if (!pluginArtifact) {
+            pluginArtifact = artifacts.data.artifacts.find(artifact =>
+              // Second try: includes 'plugin'
+              artifact.name.includes('plugin') ||
+              // Third try: includes 'agent'
+              artifact.name.includes('agent')
+            );
+          }
+          
+          // If still not found and there's only one artifact, use that
+          if (!pluginArtifact && artifacts.data.artifacts.length === 1) {
+            pluginArtifact = artifacts.data.artifacts[0];
+            console.log(`🔍 Using the only available artifact: ${pluginArtifact.name}`);
+          }
 
           if (pluginArtifact) {
+            console.log(`✅ Found matching artifact: ${pluginArtifact.name} (${pluginArtifact.id})`);
+            
             // Store the raw GitHub artifact URL for internal processing
             result.rawDownloadUrl = pluginArtifact.archive_download_url;
 
-            // Provide our endpoint that will download and serve the zip file
-            result.downloadUrl = `/api/download/github-artifact/${jobId}`;
+            // Create direct GitHub download URL (works in browser without auth)
+            const directDownloadUrl = `https://github.com/${this.owner}/${this.repo}/actions/runs/${targetRun.id}/artifacts/${pluginArtifact.id}`;
+            result.downloadUrl = directDownloadUrl;
+
+            console.log(`📥 Set download URLs:
+              - rawDownloadUrl: ${result.rawDownloadUrl}
+              - downloadUrl: ${result.downloadUrl} (direct GitHub link)`);
+          } else {
+            console.warn(`⚠️ No matching artifact found for job ID: ${jobId}`);
           }
         } catch (artifactError) {
           console.error('Error fetching artifacts:', artifactError);

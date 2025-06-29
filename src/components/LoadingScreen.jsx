@@ -7,7 +7,7 @@ const LoadingScreen = ({
   progress = null,
   onComplete = null
 }) => {
-  const logoPath = useAppLogo();
+  const { logoPath, isLoaded } = useAppLogo();
   const [dots, setDots] = useState('');
   const [currentMessage, setCurrentMessage] = useState(message);
 
@@ -56,16 +56,22 @@ const LoadingScreen = ({
         {/* Large app logo */}
         <div className="relative">
           <div className="w-32 h-32 bg-white rounded-2xl p-4 shadow-2xl shadow-purple-500/20">
-            <img
-              src={logoPath}
-              alt="Agentify Logo"
-              className="w-full h-full object-contain"
-              onError={(e) => {
-                // Fallback if logo fails to load
-                e.target.style.display = 'none';
-                e.target.nextSibling.style.display = 'flex';
-              }}
-            />
+            {isLoaded ? (
+              <img
+                src={logoPath}
+                alt="Agentify Logo"
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  // Fallback if logo fails to load
+                  e.target.style.display = 'none';
+                  e.target.nextSibling.style.display = 'flex';
+                }}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+            )}
             {/* Fallback logo */}
             <div
               className="w-full h-full bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg items-center justify-center text-white font-bold text-2xl hidden"

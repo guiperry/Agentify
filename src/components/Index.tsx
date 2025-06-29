@@ -9,13 +9,19 @@ import AgentConfig, { AgentConfiguration } from "@/components/AgentConfig";
 import AgentDeployer from "@/components/AgentDeployer";
 import Dashboard from "@/components/Dashboard";
 import StepIndicator from "@/components/StepIndicator";
+import LoadingScreen from "@/components/LoadingScreen";
+import LoginModal from "@/components/LoginModal";
 import { useOnboarding } from "@/contexts/OnboardingContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 
 const Index = () => {
   const { state, updateState, saveProgress } = useOnboarding();
   const { isAuthenticated, user, logout } = useAuth();
+  const { toast } = useToast();
   const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
 
   // State for dashboard actions (status, download, settings)
   const [dashboardIsActive, setDashboardIsActive] = useState(true);
@@ -24,6 +30,23 @@ const Index = () => {
   
   // Extract values from the onboarding context
   const { currentStep, connectedApp, agentConfig } = state;
+
+  // Initial loading effect
+  useEffect(() => {
+    // Simulate loading process
+    const loadingInterval = setInterval(() => {
+      setLoadingProgress(prev => {
+        if (prev >= 100) {
+          clearInterval(loadingInterval);
+          setTimeout(() => setIsLoading(false), 500); // Small delay after reaching 100%
+          return 100;
+        }
+        return prev + 10;
+      });
+    }, 300);
+
+    return () => clearInterval(loadingInterval);
+  }, []);
 
   // Save progress whenever state changes
   useEffect(() => {
@@ -65,6 +88,15 @@ const Index = () => {
 
   return (
     <div className="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+      {/* Full-screen loading overlay */}
+      {isLoading && (
+        <LoadingScreen 
+          isVisible={true}
+          message="Starting Agentify..."
+          progress={loadingProgress}
+        />
+      )}
+      
       {/* Navigation */}
       <nav className="border-b border-white/10 bg-black/20 backdrop-blur-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -108,13 +140,18 @@ const Index = () => {
                   </Button>
                 </div>
               ) : (
-                <Button
-                  variant="outline"
-                  onClick={() => setLoginModalOpen(true)}
-                  className="border-purple-400/50 text-purple-400 hover:bg-purple-400/10 hover:text-purple-300"
-                >
-                  Sign In
-                </Button>
+                <div className="flex items-center space-x-3">
+                  <div className="bg-amber-500/20 border border-amber-500/30 rounded-full px-3 py-1">
+                    <span className="text-amber-300 text-xs font-medium">Demo Mode</span>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => setLoginModalOpen(true)}
+                    className="border-purple-400/50 text-purple-400 hover:bg-purple-400/10 hover:text-purple-300"
+                  >
+                    Sign In
+                  </Button>
+                </div>
               )}
             </div>
 
@@ -189,6 +226,19 @@ const Index = () => {
           />
         )}
       </main>
+
+      {/* Login Modal */}
+      <LoginModal
+        open={loginModalOpen}
+        onOpenChange={setLoginModalOpen}
+        onLoginSuccess={() => {
+          // Handle any post-login actions if needed
+          toast({
+            title: "Login Successful",
+            description: "Welcome back to Agentify!",
+          });
+        }}
+      />
     </div>
   );
 };

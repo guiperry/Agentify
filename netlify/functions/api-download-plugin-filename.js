@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/download/plugin/[filename]
-// Generated: 2025-06-28T05:16:07.670Z
+// Generated: 2025-06-29T03:38:56.059Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { readFile, stat } = require('fs/promises');
@@ -67,14 +67,14 @@ async function GET(event, context) {
     }
     
     // Ensure the file has a valid plugin extension
-    const validExtensions = ['.so', '.dll', '.dylib'];
+    const validExtensions = ['.so', '.dll', '.dylib', '.zip', '.wasm'];
     const hasValidExtension = validExtensions.some(ext => filename.endsWith(ext));
-    
+
     if (!hasValidExtension) {
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({error: 'Invalid file type. Only plugin files (.so, .dll, .dylib) are allowed.'})
+      body: JSON.stringify({error: 'Invalid file type. Only plugin files (.so, .dll, .dylib, .zip, .wasm) are allowed.'})
     };
     }
     
@@ -105,6 +105,10 @@ async function GET(event, context) {
         contentType = 'application/x-msdownload';
       } else if (filename.endsWith('.dylib')) {
         contentType = 'application/x-mach-binary';
+      } else if (filename.endsWith('.zip')) {
+        contentType = 'application/zip';
+      } else if (filename.endsWith('.wasm')) {
+        contentType = 'application/wasm';
       }
       
       // Create response with appropriate headers

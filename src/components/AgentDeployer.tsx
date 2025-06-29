@@ -117,9 +117,14 @@ const AgentDeployer = ({
     }
   };
 
+  // Function to just update the platform without triggering download
+  const handlePlatformChange = (platform: 'windows' | 'mac' | 'linux') => {
+    setSelectedPlatform(platform);
+  };
+  
+  // Function to handle actual download
   const handleLocalDownload = (platform: 'windows' | 'mac' | 'linux') => {
     setSelectedPlatform(platform);
-    setShowLocalGuide(true);
     toast({
       title: "Downloading Agentic Engine",
       description: `Downloading Agentic Engine for ${platform} with your compiled agent plugin`,
@@ -184,98 +189,8 @@ const AgentDeployer = ({
         </div>
       )}
 
-      {/* Top row with Local Deploy and Blockchain Deploy */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {/* Local Deployment */}
-        <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center">
-              <Download className="h-5 w-5 mr-2 text-green-400" />
-              Local Deploy
-            </CardTitle>
-            <CardDescription className="text-white/70">
-              Download and run your agent locally on your machine
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-4">
-              <p className="text-white/80 text-sm">
-                Download the Agentic Engine desktop application with your compiled agent plugin
-                for local deployment and testing.
-              </p>
-
-              <div className="space-y-3">
-                <h4 className="text-white font-medium">Choose your platform:</h4>
-                <div className="grid grid-cols-1 gap-3">
-                  <Button
-                    onClick={() => handleLocalDownload('windows')}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white justify-start"
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Windows (x64)
-                  </Button>
-                  <Button
-                    onClick={() => handleLocalDownload('mac')}
-                    className="w-full bg-gray-600 hover:bg-gray-700 text-white justify-start"
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    macOS (Intel/Apple Silicon)
-                  </Button>
-                  <Button
-                    onClick={() => handleLocalDownload('linux')}
-                    className="w-full bg-orange-600 hover:bg-orange-700 text-white justify-start"
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Linux (x64)
-                  </Button>
-                </div>
-              </div>
-
-              <div className="bg-white/10 rounded-lg p-4 mt-6">
-                <h5 className="text-white font-medium mb-2">What's included:</h5>
-                <ul className="text-white/70 text-sm space-y-1">
-                  <li>• Agentic Engine desktop application</li>
-                  <li>• Your compiled agent plugin{compilationData?.success ? ` (${compilationData.compilationMethod})` : ''}</li>
-                  <li>• Desktop configuration instructions</li>
-                  <li>• Local testing environment</li>
-                </ul>
-                {compilationData?.success && (
-                  <div className="mt-3 p-2 bg-green-900/20 border border-green-500/30 rounded">
-                    <div className="text-green-400 text-xs">
-                      ✓ Plugin compiled successfully
-                      {compilationData.filename && ` - ${compilationData.filename}`}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Blockchain Deployment */}
-        <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center">
-              <Activity className="h-5 w-5 mr-2 text-orange-400" />
-              Blockchain Deploy
-            </CardTitle>
-            <CardDescription className="text-white/70">
-              Deploy to custom blockchain application on AWS
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <BlockchainDeploymentPanel
-              agentConfig={agentConfig}
-              onDeployComplete={() => setIsDeploymentComplete(true)}
-              compiledPluginUrl={compiledPluginUrl}
-              compilationJobId={compilationJobId}
-            />
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Bottom row with Cloud Deploy (full width) */}
-      <div className="grid grid-cols-1 gap-8">
+      {/* Top row with Cloud Deploy (full width) */}
+      <div className="grid grid-cols-1 gap-8 mb-8">
         {/* Cloud Deployment */}
         <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
           <CardHeader>
@@ -328,55 +243,92 @@ const AgentDeployer = ({
         </Card>
       </div>
 
-      {/* Local Deployment Guide */}
-      {showLocalGuide && (
-        <div className="mt-12">
-          <LocalDeploymentGuide
-            agentName={agentConfig.name}
-            platform={selectedPlatform}
-            onDownload={onDownload}
-          />
-        </div>
-      )}
+      {/* Bottom row with Local Deploy and Blockchain Deploy */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Local Deployment */}
+        <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
+          <CardHeader>
+            <CardTitle className="text-white flex items-center">
+              <Download className="h-5 w-5 mr-2 text-green-400" />
+              Local Deploy
+            </CardTitle>
+            <CardDescription className="text-white/70">
+              Download and run your agent locally on your machine
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <LocalDeploymentGuide
+              agentName={agentConfig.name}
+              platform={selectedPlatform}
+              onDownload={onDownload}
+              compiledPluginUrl={compiledPluginUrl}
+              onPlatformChange={handlePlatformChange}
+            />
+          </CardContent>
+        </Card>
 
-      {/* Deployment Stats */}
-      <div className="mt-12">
-        <h3 className="text-xl font-semibold text-white mb-6">Deployment Statistics</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-white/70">Total Deployments</CardTitle>
-              <Rocket className="h-4 w-4 text-purple-400" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-white">12</div>
-              <p className="text-xs text-white/50">+2 from last month</p>
-            </CardContent>
-          </Card>
+        {/* Blockchain Deployment */}
+        <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
+          <CardHeader>
+            <CardTitle className="text-white flex items-center">
+              <Activity className="h-5 w-5 mr-2 text-orange-400" />
+              Blockchain Deploy
+            </CardTitle>
+            <CardDescription className="text-white/70">
+              Deploy to custom blockchain application on AWS
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <BlockchainDeploymentPanel
+              agentConfig={agentConfig}
+              onDeployComplete={() => setIsDeploymentComplete(true)}
+              compiledPluginUrl={compiledPluginUrl}
+              compilationJobId={compilationJobId}
+            />
+            
+            {/* Network Statistics */}
+            <div className="mt-6">
+              <h3 className="text-lg font-semibold text-white mb-4">Network Statistics</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-white/70">Total Deployments</CardTitle>
+                    <Rocket className="h-4 w-4 text-purple-400" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-white">12</div>
+                    <p className="text-xs text-white/50">+2 from last month</p>
+                  </CardContent>
+                </Card>
 
-          <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-white/70">Active Instances</CardTitle>
-              <Monitor className="h-4 w-4 text-green-400" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-white">3</div>
-              <p className="text-xs text-white/50">All systems operational</p>
-            </CardContent>
-          </Card>
+                <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-white/70">Active Instances</CardTitle>
+                    <Monitor className="h-4 w-4 text-green-400" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-white">3</div>
+                    <p className="text-xs text-white/50">All systems operational</p>
+                  </CardContent>
+                </Card>
 
-          <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-white/70">Success Rate</CardTitle>
-              <Cloud className="h-4 w-4 text-blue-400" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-white">98.5%</div>
-              <p className="text-xs text-white/50">Last 30 days</p>
-            </CardContent>
-          </Card>
-        </div>
+                <Card className="bg-white/5 border-white/10 backdrop-blur-lg">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium text-white/70">Success Rate</CardTitle>
+                    <Cloud className="h-4 w-4 text-blue-400" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-white">98.5%</div>
+                    <p className="text-xs text-white/50">Last 30 days</p>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Local Deployment Guide has been moved to the Local Deploy panel */}
     </div>
   );
 };

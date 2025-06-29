@@ -9,39 +9,45 @@ export class SSEClient {
   }
 
   connect() {
-    this.eventSource = new EventSource(this.url);
-    
-    this.eventSource.onopen = () => {
-      this.reconnectAttempts = 0;
-      this.emit('open');
-    };
-
-    this.eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        this.emit(data.type, data);
-      } catch (error) {
-        console.error('Error parsing SSE message:', error);
-      }
-    };
-
-    this.eventSource.onerror = () => {
-      this.eventSource.close();
-      this.emit('error', { message: 'SSE connection error' });
+    try {
+      console.log(`SSEClient: Connecting to ${this.url}`);
+      this.eventSource = new EventSource(this.url);
       
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
-        setTimeout(() => {
-          this.reconnectAttempts++;
-          this.reconnectDelay = Math.min(
-            this.reconnectDelay * 2,
-            30000
-          );
-          this.connect();
-        }, this.reconnectDelay);
-      } else {
+      this.eventSource.onopen = () => {
+        console.log('SSEClient: Connection opened successfully');
+        this.reconnectAttempts = 0;
+        this.reconnectDelay = 1000; // Reset delay on successful connection
+        this.emit('open');
+      };
+  
+      this.eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.emit(data.type, data);
+        } catch (error) {
+          console.error('SSEClient: Error parsing SSE message:', error);
+        }
+      };
+  
+      this.eventSource.onerror = (err) => {
+        console.error('SSEClient: Connection error', err);
+        
+        // Always close the connection on error
+        if (this.eventSource) {
+          this.eventSource.close();
+          this.eventSource = null;
+        }
+        
+        this.emit('error', { message: 'SSE connection error' });
+        
+        // Don't attempt to reconnect here - let the SSEManager handle it
         this.emit('close');
-      }
-    };
+      };
+    } catch (error) {
+      console.error('SSEClient: Failed to create EventSource:', error);
+      this.emit('error', { message: `Failed to create EventSource: ${error.message}` });
+      this.emit('close');
+    }
   }
 
   on(event, callback) {
@@ -68,8 +74,14 @@ export class SSEClient {
   }
 
   close() {
+    console.log('SSEClient: Closing connection');
     if (this.eventSource) {
-      this.eventSource.close();
+      try {
+        this.eventSource.close();
+        this.eventSource = null;
+      } catch (error) {
+        console.error('SSEClient: Error closing EventSource:', error);
+      }
       this.emit('close');
     }
   }

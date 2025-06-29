@@ -137,28 +137,51 @@ function convertTypeScriptToJavaScript(content) {
   converted = converted.replace(/job_id,/g, 'job_id: jobId,');
 
   // Replace deprecated substr with substring
-  converted = converted.replace(/\.substr\((\d+),\s*(\d+)\)/g, '.substring($1, $1 + $2)');
+  // substr(start, length) -> substring(start, start + length)
+  converted = converted.replace(/\.substr\((\d+),\s*(\d+)\)/g, (match, start, length) => {
+    const startNum = parseInt(start);
+    const lengthNum = parseInt(length);
+    return `.substring(${startNum}, ${startNum + lengthNum})`;
+  });
 
   // Fix template literal corruption - sometimes ${} gets converted to {}
   // This is a post-processing fix for template literals
-  converted = converted.replace(/`([^`]*)\{([^}]+)\}([^`]*)`/g, (match, before, content, after) => {
+  converted = converted.replace(/`([^`]*)\{([^}]+)\}([^`]*)`/g, (_, before, content, after) => {
     // Only fix if it looks like it should be a template literal variable
     if (content.includes('jobId') || content.includes('error') || content.includes('response') ||
         content.includes('targetRun') || content.includes('runs.data') || content.includes('failedJob') ||
-        content.includes('Date.now') || content.includes('Math.random')) {
+        content.includes('Date.now') || content.includes('Math.random') || content.includes('agentName') ||
+        content.includes('artifact') || content.includes('run.') || content.includes('job.') ||
+        content.includes('result.') || content.includes('status') || content.includes('pluginArtifact')) {
       return `\`${before}\${${content}}${after}\``;
     }
-    return match;
+    return `\`${before}{${content}}${after}\``;
   });
 
-  // Additional fix for template literals that might have lost the colon
-  converted = converted.replace(/console\.log\(`([^`]*) ID\{([^}]+)\}`\)/g, 'console.log(`$1 ID: ${$2}`)');
-  converted = converted.replace(/console\.log\(`([^`]*)\{([^}]+)\}`\)/g, 'console.log(`$1: ${$2}`)');
-  converted = converted.replace(/Error\(`([^`]*)\{([^}]+)\}`\)/g, 'Error(`$1: ${$2}`)');
-  converted = converted.replace(/`([^`]*) in step\{([^}]+)\}`/g, '`$1 in step: ${$2}`');
+  // Fix specific template literal patterns that got corrupted
+  converted = converted.replace(/\$\$\{/g, '${'); // Fix double dollar signs
+  converted = converted.replace(/\$\{([^}]+)\}\$/g, '${$1}'); // Fix trailing dollar signs
+  converted = converted.replace(/console\.log\(`([^`]*) ID\$: \$\{([^}]+)\}`\)/g, 'console.log(`$1 ID: ${$2}`)');
+  converted = converted.replace(/console\.log\(`([^`]*)\$: \$\{([^}]+)\}`\)/g, 'console.log(`$1: ${$2}`)');
+  converted = converted.replace(/Error\(`([^`]*)\$: \$\{([^}]+)\}`\)/g, 'Error(`$1: ${$2}`)');
+  converted = converted.replace(/`([^`]*) in step\$: \$\{([^}]+)\}`/g, '`$1 in step: ${$2}`');
+
+  // Fix specific patterns found in the github-actions-compiler
+  converted = converted.replace(/\$\{Math\.random\(\)\.toString\(36\)\.substring\(2, 2 \+ 9\)\}/g, '${Math.random().toString(36).substring(2, 9)}');
+  converted = converted.replace(/`compile-\$\{Date\.now\(\)\}-\$\$\{Math\.random\(\)\.toString\(36\)\.substring\(2, 2 \+ 9\)\}`/g, '`compile-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`');
+  converted = converted.replace(/`([^`]*)\$\{([^}]+)\}`/g, '`$1${$2}`'); // Remove extra $ before template literals
 
   // Remove empty lines that might have been created
   converted = converted.replace(/\n\s*\n\s*\n/g, '\n\n');
+
+  // Final cleanup of template literal corruption
+  converted = converted.replace(/\$\$\{/g, '${'); // Fix double dollar signs
+  converted = converted.replace(/\}\$/g, '}'); // Remove trailing dollar signs
+  converted = converted.replace(/ID\$:/g, 'ID:'); // Fix "ID$:" patterns
+  converted = converted.replace(/job\$:/g, 'job:'); // Fix "job$:" patterns
+  converted = converted.replace(/workflow\$:/g, 'workflow:'); // Fix "workflow$:" patterns
+  converted = converted.replace(/failed\$:/g, 'failed:'); // Fix "failed$:" patterns
+  converted = converted.replace(/artifact\$:/g, 'artifact:'); // Fix "artifact$:" patterns
 
   // Convert class exports to module.exports
   converted = converted.replace(/class\s+(\w+)/g, 'class $1');

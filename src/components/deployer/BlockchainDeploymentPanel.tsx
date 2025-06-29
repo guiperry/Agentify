@@ -18,7 +18,10 @@ import {
   ExternalLink,
   AlertTriangle,
   Zap,
-  Shield
+  Shield,
+  Wallet,
+  CreditCard,
+  Coins
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -42,46 +45,92 @@ const BlockchainDeploymentPanel = ({
 }: BlockchainDeploymentPanelProps) => {
   const { toast } = useToast();
   const [isDeploying, setIsDeploying] = useState(false);
+  const [isPurchasingTokens, setIsPurchasingTokens] = useState(false);
   const [deploymentStatus, setDeploymentStatus] = useState<
-    "idle" | "preparing" | "provisioning" | "deploying" | "configuring" | "success" | "failed"
+    "idle" | "purchasing" | "preparing" | "deploying" | "confirming" | "success" | "failed"
   >("idle");
   const [deploymentProgress, setDeploymentProgress] = useState(0);
-  const [awsConfig, setAwsConfig] = useState({
-    region: "us-east-1",
-    instanceType: "t3.medium",
-    keyPairName: "",
-    environment: "production" as "staging" | "production"
+  const [networkConfig, setNetworkConfig] = useState({
+    tokenAmount: 50,
+    networkTier: "standard" as "basic" | "standard" | "premium",
+    walletAddress: "",
+    agentWalletAddress: "0x" + Math.random().toString(16).substring(2, 12) + Math.random().toString(16).substring(2, 12)
   });
+  
+  const [tokenBalance, setTokenBalance] = useState(0);
+  const [hasPurchasedTokens, setHasPurchasedTokens] = useState(false);
 
-  const awsRegions = [
-    { value: "us-east-1", label: "US East (N. Virginia)" },
-    { value: "us-west-2", label: "US West (Oregon)" },
-    { value: "eu-west-1", label: "Europe (Ireland)" },
-    { value: "ap-southeast-1", label: "Asia Pacific (Singapore)" }
+  const networkTiers = [
+    { value: "basic", label: "Basic (1 NRN/hour, Limited resources)", fee: 10 },
+    { value: "standard", label: "Standard (5 NRN/hour, Moderate resources)", fee: 50 },
+    { value: "premium", label: "Premium (15 NRN/hour, High resources)", fee: 150 }
   ];
 
-  const instanceTypes = [
-    { value: "t3.small", label: "t3.small (2 vCPU, 2 GB RAM)" },
-    { value: "t3.medium", label: "t3.medium (2 vCPU, 4 GB RAM)" },
-    { value: "t3.large", label: "t3.large (2 vCPU, 8 GB RAM)" },
-    { value: "m5.large", label: "m5.large (2 vCPU, 8 GB RAM)" },
-    { value: "m5.xlarge", label: "m5.xlarge (4 vCPU, 16 GB RAM)" }
-  ];
+  const getTierFee = (tier: string) => {
+    const selectedTier = networkTiers.find(t => t.value === tier);
+    return selectedTier ? selectedTier.fee : 50;
+  };
 
-  const handleBlockchainDeploy = async () => {
-    if (!awsConfig.keyPairName) {
+  const handlePurchaseTokens = async () => {
+    if (networkConfig.tokenAmount <= 0) {
       toast({
-        title: "Configuration Required",
-        description: "Please provide an AWS Key Pair name for deployment.",
+        title: "Invalid Amount",
+        description: "Please enter a valid token amount to purchase.",
         variant: "destructive",
       });
       return;
     }
 
+    setIsPurchasingTokens(true);
+    setDeploymentStatus("purchasing");
+    setDeploymentProgress(10);
+
+    try {
+      // Simulate token purchase API call
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      setTokenBalance(networkConfig.tokenAmount);
+      setHasPurchasedTokens(true);
+      setDeploymentProgress(30);
+      
+      toast({
+        title: "Tokens Purchased",
+        description: `Successfully purchased ${networkConfig.tokenAmount} NRN tokens.`,
+      });
+
+      // Simulate transaction confirmation
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setDeploymentStatus("idle");
+      setDeploymentProgress(0);
+      
+    } catch (error) {
+      console.error('Token purchase error:', error);
+      toast({
+        title: "Purchase Failed",
+        description: "Failed to purchase NRN tokens. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsPurchasingTokens(false);
+    }
+  };
+
+  const handleBlockchainDeploy = async () => {
+    const requiredFee = getTierFee(networkConfig.networkTier);
+    
     if (!compiledPluginUrl && !compilationJobId) {
       toast({
         title: "Plugin Required",
-        description: "Please compile your agent first before deploying to blockchain.",
+        description: "Please compile your agent first before deploying to the network.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (tokenBalance < requiredFee) {
+      toast({
+        title: "Insufficient Tokens",
+        description: `You need at least ${requiredFee} NRN tokens for this deployment tier.`,
         variant: "destructive",
       });
       return;
@@ -92,7 +141,7 @@ const BlockchainDeploymentPanel = ({
     setDeploymentProgress(0);
 
     try {
-      const deploymentId = `blockchain-deploy-${Date.now()}`;
+      const deploymentId = `network-deploy-${Date.now()}`;
       
       // Call deployment API
       const response = await fetch('/api/deploy', {
@@ -104,14 +153,13 @@ const BlockchainDeploymentPanel = ({
           deploymentId,
           agentName: agentConfig.name,
           version: '1.0.0',
-          environment: awsConfig.environment,
-          deploymentType: 'blockchain-aws',
+          deploymentType: 'decentralized-network',
           pluginUrl: compiledPluginUrl,
           jobId: compilationJobId,
-          awsConfig: {
-            region: awsConfig.region,
-            instanceType: awsConfig.instanceType,
-            keyPairName: awsConfig.keyPairName
+          networkConfig: {
+            tier: networkConfig.networkTier,
+            fee: requiredFee,
+            walletAddress: networkConfig.agentWalletAddress
           }
         }),
       });
@@ -119,23 +167,26 @@ const BlockchainDeploymentPanel = ({
       const result = await response.json();
       
       if (!result.success) {
-        throw new Error(result.error || 'Blockchain deployment failed');
+        throw new Error(result.error || 'Network deployment failed');
       }
+
+      // Deduct tokens from balance
+      setTokenBalance(prev => prev - requiredFee);
 
       toast({
         title: "Deployment Started",
-        description: `Blockchain deployment initiated. Estimated time: ${result.estimatedTime}`,
+        description: `Network deployment initiated. Your agent will be live shortly.`,
       });
 
-      // Simulate blockchain deployment process (longer than regular deployment)
+      // Simulate blockchain deployment process
       const steps = [
-        { status: "preparing" as const, progress: 10, message: "Downloading plugin package..." },
-        { status: "provisioning" as const, progress: 25, message: "Provisioning AWS infrastructure..." },
-        { status: "provisioning" as const, progress: 40, message: "Setting up blockchain nodes..." },
-        { status: "deploying" as const, progress: 60, message: "Running Ansible playbook..." },
-        { status: "deploying" as const, progress: 75, message: "Deploying blockchain application..." },
-        { status: "configuring" as const, progress: 90, message: "Configuring agent plugin..." },
-        { status: "success" as const, progress: 100, message: "Blockchain deployment successful!" }
+        { status: "preparing" as const, progress: 15, message: "Preparing agent package..." },
+        { status: "preparing" as const, progress: 30, message: "Submitting to network..." },
+        { status: "deploying" as const, progress: 45, message: "Deploying to decentralized nodes..." },
+        { status: "deploying" as const, progress: 60, message: "Allocating network resources..." },
+        { status: "confirming" as const, progress: 75, message: "Waiting for network confirmation..." },
+        { status: "confirming" as const, progress: 90, message: "Finalizing deployment..." },
+        { status: "success" as const, progress: 100, message: "Network deployment successful!" }
       ];
 
       steps.forEach((step, index) => {
@@ -148,16 +199,16 @@ const BlockchainDeploymentPanel = ({
               onDeployComplete();
             }, 1000);
           }
-        }, (index + 1) * 4000); // 4 second intervals for blockchain deployment
+        }, (index + 1) * 2000); // 2 second intervals for network deployment
       });
 
     } catch (error) {
-      console.error('Blockchain deployment error:', error);
+      console.error('Network deployment error:', error);
       setDeploymentStatus("failed");
       setIsDeploying(false);
       toast({
         title: "Deployment Failed",
-        description: error instanceof Error ? error.message : "Blockchain deployment failed",
+        description: error instanceof Error ? error.message : "Network deployment failed",
         variant: "destructive",
       });
     }
@@ -165,10 +216,11 @@ const BlockchainDeploymentPanel = ({
 
   const getStatusIcon = () => {
     switch (deploymentStatus) {
+      case "purchasing":
+        return <Coins className="w-12 h-12 mx-auto mb-4 animate-pulse text-yellow-400" />;
       case "preparing":
-      case "provisioning":
       case "deploying":
-      case "configuring":
+      case "confirming":
         return <Loader2 className="w-12 h-12 mx-auto mb-4 animate-spin text-orange-400" />;
       case "success":
         return <CheckCircle className="w-12 h-12 mx-auto mb-4 text-green-400" />;
@@ -181,87 +233,109 @@ const BlockchainDeploymentPanel = ({
 
   const getStatusMessage = () => {
     switch (deploymentStatus) {
+      case "purchasing":
+        return "Purchasing NRN tokens...";
       case "preparing":
-        return "Preparing deployment package...";
-      case "provisioning":
-        return "Provisioning AWS infrastructure...";
+        return "Preparing agent for network deployment...";
       case "deploying":
-        return "Deploying blockchain application...";
-      case "configuring":
-        return "Configuring agent plugin...";
+        return "Deploying to decentralized network...";
+      case "confirming":
+        return "Waiting for network confirmation...";
       case "success":
-        return "Blockchain deployment successful!";
+        return "Network deployment successful!";
       case "failed":
         return "Deployment failed. Check logs for details.";
       default:
-        return "Ready to deploy to blockchain";
+        return hasPurchasedTokens 
+          ? "Ready to deploy to decentralized network" 
+          : "Purchase NRN tokens to deploy";
     }
   };
 
   return (
     <div className="space-y-6">
-      {/* AWS Configuration */}
+      {/* Token Purchase Section */}
+      <div className="space-y-4">
+        <div className="flex items-center space-x-2">
+          <Coins className="w-4 h-4 text-yellow-400" />
+          <h4 className="text-white font-medium">Network Tokens (NRN)</h4>
+        </div>
+        
+        <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-4">
+          <div className="flex justify-between items-center mb-4">
+            <div className="text-white">
+              <div className="text-sm text-slate-400">Current Balance</div>
+              <div className="text-xl font-bold">{tokenBalance} <span className="text-yellow-400">NRN</span></div>
+            </div>
+            <Badge className="bg-yellow-500/20 text-yellow-400 px-3 py-1">
+              <Wallet className="w-3 h-3 mr-1" />
+              {networkConfig.agentWalletAddress.substring(0, 6)}...{networkConfig.agentWalletAddress.substring(networkConfig.agentWalletAddress.length - 4)}
+            </Badge>
+          </div>
+          
+          <div className="grid grid-cols-1 gap-4">
+            <div>
+              <Label htmlFor="token-amount" className="text-white/80">Purchase Amount</Label>
+              <div className="flex space-x-2">
+                <Input
+                  id="token-amount"
+                  type="number"
+                  value={networkConfig.tokenAmount}
+                  onChange={(e) => setNetworkConfig(prev => ({ ...prev, tokenAmount: parseInt(e.target.value) || 0 }))}
+                  placeholder="50"
+                  className="bg-slate-700 border-slate-600 text-white"
+                />
+                <Button
+                  onClick={handlePurchaseTokens}
+                  disabled={isPurchasingTokens || networkConfig.tokenAmount <= 0}
+                  className="bg-yellow-600 hover:bg-yellow-700 text-white"
+                >
+                  {isPurchasingTokens ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Purchasing...
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-4 h-4 mr-2" />
+                      Buy Tokens
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Network Configuration */}
       <div className="space-y-4">
         <div className="flex items-center space-x-2">
           <Settings className="w-4 h-4 text-orange-400" />
-          <h4 className="text-white font-medium">AWS Configuration</h4>
+          <h4 className="text-white font-medium">Network Configuration</h4>
         </div>
         
         <div className="grid grid-cols-1 gap-4">
           <div>
-            <Label htmlFor="aws-region" className="text-white/80">AWS Region</Label>
-            <Select value={awsConfig.region} onValueChange={(value) => setAwsConfig(prev => ({ ...prev, region: value }))}>
+            <Label htmlFor="network-tier" className="text-white/80">Network Tier</Label>
+            <Select 
+              value={networkConfig.networkTier} 
+              onValueChange={(value: "basic" | "standard" | "premium") => setNetworkConfig(prev => ({ ...prev, networkTier: value }))}
+            >
               <SelectTrigger className="bg-slate-800 border-slate-600 text-white">
-                <SelectValue placeholder="Select AWS region" />
+                <SelectValue placeholder="Select network tier" />
               </SelectTrigger>
               <SelectContent>
-                {awsRegions.map((region) => (
-                  <SelectItem key={region.value} value={region.value}>
-                    {region.label}
+                {networkTiers.map((tier) => (
+                  <SelectItem key={tier.value} value={tier.value}>
+                    {tier.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          <div>
-            <Label htmlFor="instance-type" className="text-white/80">Instance Type</Label>
-            <Select value={awsConfig.instanceType} onValueChange={(value) => setAwsConfig(prev => ({ ...prev, instanceType: value }))}>
-              <SelectTrigger className="bg-slate-800 border-slate-600 text-white">
-                <SelectValue placeholder="Select instance type" />
-              </SelectTrigger>
-              <SelectContent>
-                {instanceTypes.map((type) => (
-                  <SelectItem key={type.value} value={type.value}>
-                    {type.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label htmlFor="key-pair" className="text-white/80">AWS Key Pair Name *</Label>
-            <Input
-              id="key-pair"
-              value={awsConfig.keyPairName}
-              onChange={(e) => setAwsConfig(prev => ({ ...prev, keyPairName: e.target.value }))}
-              placeholder="my-key-pair"
-              className="bg-slate-800 border-slate-600 text-white"
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="environment" className="text-white/80">Environment</Label>
-            <Select value={awsConfig.environment} onValueChange={(value: "staging" | "production") => setAwsConfig(prev => ({ ...prev, environment: value }))}>
-              <SelectTrigger className="bg-slate-800 border-slate-600 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="staging">Staging</SelectItem>
-                <SelectItem value="production">Production</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="mt-2 text-sm text-orange-300">
+              Network fee: {getTierFee(networkConfig.networkTier)} NRN
+            </div>
           </div>
         </div>
       </div>
@@ -275,7 +349,7 @@ const BlockchainDeploymentPanel = ({
       </div>
 
       {/* Progress Bar */}
-      {isDeploying && (
+      {(isDeploying || isPurchasingTokens) && (
         <div className="space-y-2">
           <Progress value={deploymentProgress} className="w-full" />
           <div className="text-sm text-slate-400 text-center">
@@ -287,18 +361,18 @@ const BlockchainDeploymentPanel = ({
       {/* Deploy Button */}
       <Button
         onClick={handleBlockchainDeploy}
-        disabled={isDeploying || !awsConfig.keyPairName}
+        disabled={isDeploying || tokenBalance < getTierFee(networkConfig.networkTier) || !hasPurchasedTokens}
         className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600"
       >
         {isDeploying ? (
           <>
             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            Deploying to Blockchain...
+            Minting Agent...
           </>
         ) : (
           <>
             <Activity className="w-4 h-4 mr-2" />
-            Deploy to Blockchain AWS
+            Mint Agent
           </>
         )}
       </Button>
@@ -308,8 +382,8 @@ const BlockchainDeploymentPanel = ({
         <div className="flex items-start space-x-2">
           <AlertTriangle className="w-5 h-5 text-orange-400 mt-0.5" />
           <div className="text-orange-200 text-sm">
-            <p className="font-medium mb-1">Blockchain Deployment</p>
-            <p>This will deploy your agent to a custom blockchain application on AWS using Ansible automation. The process typically takes 10-15 minutes.</p>
+            <p className="font-medium mb-1">Decentralized Network Deployment</p>
+            <p>This will deploy your agent to a decentralized network using NRN tokens. Your agent will run on distributed nodes for maximum reliability and uptime. Network fees are charged hourly based on your selected tier.</p>
           </div>
         </div>
       </div>
