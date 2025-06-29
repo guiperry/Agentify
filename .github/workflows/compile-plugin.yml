@@ -7,6 +7,11 @@ on:
         description: 'Unique job identifier'
         required: true
         type: string
+      agent_name:
+        description: 'Agent name'
+        required: false
+        default: 'unnamed-agent'
+        type: string
       config:
         description: 'Agent configuration JSON'
         required: true
@@ -29,8 +34,8 @@ on:
           - darwin
           - windows
 
-# Set the run name to include the job ID for easier tracking
-run-name: "Compile Agent Plugin - Job ${{ inputs.job_id }}"
+# Set the run name to include the agent name and job ID for easier tracking
+run-name: "Compile ${{ inputs.agent_name }} - Job ${{ inputs.job_id }}"
 
 jobs:
   compile:
@@ -197,6 +202,7 @@ jobs:
         # Create a deployment info file
         cat > deployment_info.json << EOF
         {
+          "agent_name": "${{ inputs.agent_name }}",
           "job_id": "${{ inputs.job_id }}",
           "build_target": "${{ inputs.build_target }}",
           "platform": "${{ inputs.platform }}",
@@ -212,14 +218,15 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: agent-plugin-${{ inputs.job_id }}
+        name: ${{ inputs.agent_name }}-plugin-${{ inputs.job_id }}
         path: /tmp/output/
         retention-days: 7
         
     - name: Compilation summary
       run: |
         echo "✅ Agent plugin compilation completed successfully"
+        echo "Agent Name: ${{ inputs.agent_name }}"
         echo "Job ID: ${{ inputs.job_id }}"
         echo "Build Target: ${{ inputs.build_target }}"
         echo "Platform: ${{ inputs.platform }}"
-        echo "Artifacts uploaded with name: agent-plugin-${{ inputs.job_id }}"
+        echo "Artifacts uploaded with name: ${{ inputs.agent_name }}-plugin-${{ inputs.job_id }}"
