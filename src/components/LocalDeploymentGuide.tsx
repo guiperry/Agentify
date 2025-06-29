@@ -3,14 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  Download, 
-  Terminal, 
-  Settings, 
-  CheckCircle, 
-  Copy, 
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Download,
+  Settings,
+  CheckCircle,
+  Copy,
   ExternalLink,
   Monitor,
   Folder,
@@ -30,6 +29,8 @@ interface LocalDeploymentGuideProps {
 const LocalDeploymentGuide = ({ agentName, platform: initialPlatform, onDownload, compiledPluginUrl, onPlatformChange }: LocalDeploymentGuideProps) => {
   const [activeStep, setActiveStep] = useState(0);
   const [platform, setPlatform] = useState<'windows' | 'mac' | 'linux'>(initialPlatform);
+  const [showMacModal, setShowMacModal] = useState(false);
+  const [showLinuxModal, setShowLinuxModal] = useState(false);
   const { toast } = useToast();
   
   // Update parent component when platform changes
@@ -45,6 +46,49 @@ const LocalDeploymentGuide = ({ agentName, platform: initialPlatform, onDownload
     toast({
       title: "Copied to clipboard",
       description: "Command copied to clipboard",
+    });
+  };
+
+  const handleDownloadEngine = (platform: 'windows' | 'mac' | 'linux') => {
+    if (platform === 'windows') {
+      // Direct download for Windows
+      window.open('https://agentic-engine-binaries.s3.us-east-2.amazonaws.com/AgenticInferenceEngine_windows_amd64.zip', '_blank');
+      toast({
+        title: "Downloading Windows Engine",
+        description: "Starting download for Windows Agentic Engine",
+      });
+    } else if (platform === 'mac') {
+      // Show modal for Mac architecture selection
+      setShowMacModal(true);
+    } else if (platform === 'linux') {
+      // Show modal for Linux architecture selection
+      setShowLinuxModal(true);
+    }
+  };
+
+  const handleMacDownload = (architecture: 'arm64' | 'amd64') => {
+    const url = architecture === 'arm64'
+      ? 'https://agentic-engine-binaries.s3.us-east-2.amazonaws.com/AgenticInferenceEngine_darwin_arm64.tar.gz'
+      : 'https://agentic-engine-binaries.s3.us-east-2.amazonaws.com/AgenticInferenceEngine_darwin_amd64.tar.gz';
+
+    window.open(url, '_blank');
+    setShowMacModal(false);
+    toast({
+      title: `Downloading Mac Engine (${architecture})`,
+      description: `Starting download for Mac ${architecture} Agentic Engine`,
+    });
+  };
+
+  const handleLinuxDownload = (architecture: 'arm64' | 'amd64') => {
+    const url = architecture === 'arm64'
+      ? 'https://agentic-engine-binaries.s3.us-east-2.amazonaws.com/AgenticInferenceEngine_linux_arm64.tar.gz'
+      : 'https://agentic-engine-binaries.s3.us-east-2.amazonaws.com/AgenticInferenceEngine_linux_amd64.tar.gz';
+
+    window.open(url, '_blank');
+    setShowLinuxModal(false);
+    toast({
+      title: `Downloading Linux Engine (${architecture})`,
+      description: `Starting download for Linux ${architecture} Agentic Engine`,
     });
   };
 
@@ -113,7 +157,7 @@ const LocalDeploymentGuide = ({ agentName, platform: initialPlatform, onDownload
               </div>
             </div>
             <Button
-              onClick={() => onDownload(platform)}
+              onClick={() => handleDownloadEngine(platform)}
               className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600"
             >
               <Download className="h-4 w-4 mr-2" />
@@ -576,6 +620,62 @@ const LocalDeploymentGuide = ({ agentName, platform: initialPlatform, onDownload
           </Tabs>
         </CardContent>
       </Card>
+
+      {/* Mac Architecture Selection Modal */}
+      <Dialog open={showMacModal} onOpenChange={setShowMacModal}>
+        <DialogContent className="bg-slate-900 border-white/10">
+          <DialogHeader>
+            <DialogTitle className="text-white">Choose Mac Architecture</DialogTitle>
+            <DialogDescription className="text-white/70">
+              Select your Mac's processor architecture to download the correct version.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3 my-4">
+            <Button
+              onClick={() => handleMacDownload('arm64')}
+              className="bg-slate-800 border border-slate-600 text-white hover:bg-slate-700 hover:text-white justify-start"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Mac Apple Silicon (M1/M2/M3) - ARM64
+            </Button>
+            <Button
+              onClick={() => handleMacDownload('amd64')}
+              className="bg-slate-800 border border-slate-600 text-white hover:bg-slate-700 hover:text-white justify-start"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Mac Intel - AMD64
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Linux Architecture Selection Modal */}
+      <Dialog open={showLinuxModal} onOpenChange={setShowLinuxModal}>
+        <DialogContent className="bg-slate-900 border-white/10">
+          <DialogHeader>
+            <DialogTitle className="text-white">Choose Linux Architecture</DialogTitle>
+            <DialogDescription className="text-white/70">
+              Select your Linux system's processor architecture to download the correct version.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3 my-4">
+            <Button
+              onClick={() => handleLinuxDownload('arm64')}
+              className="bg-slate-800 border border-slate-600 text-white hover:bg-slate-700 hover:text-white justify-start"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Linux ARM64 (Raspberry Pi, ARM servers)
+            </Button>
+            <Button
+              onClick={() => handleLinuxDownload('amd64')}
+              className="bg-slate-800 border border-slate-600 text-white hover:bg-slate-700 hover:text-white justify-start"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Linux AMD64 (Intel/AMD 64-bit)
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
