@@ -40,6 +40,8 @@ export async function POST(request: Request) {
     // Create a UI config object that matches the expected format for conversion
     const uiConfigForConversion = {
       name: agentConfig.name,
+      // Explicitly add agent_name to ensure it's available for GitHub Actions compilation
+      agent_name: agentConfig.agent_name || agentConfig.name,
       personality: agentConfig.personality,
       instructions: agentConfig.instructions || `You are ${agentConfig.name}, a helpful AI assistant.`,
       features: agentConfig.features,
@@ -48,6 +50,13 @@ export async function POST(request: Request) {
         creativity: agentConfig.settings?.creativity || 0.7
       }
     };
+    
+    // Log the UI config for debugging
+    console.log('UI config for conversion:', {
+      name: uiConfigForConversion.name,
+      agent_name: uiConfigForConversion.agent_name,
+      hasAgentName: !!uiConfigForConversion.agent_name
+    });
 
     // Send configuration processing update
     await sendCompilationUpdate('configuration', 30, 'Processing agent configuration...');

@@ -63,7 +63,7 @@ class GitHubActionsCompiler {
       
       // If agent_name is missing but name exists, use that instead
       if (!config.agent_name && (config).name) {
-        console.log(`Setting agent_name from name property${(config).name}`);
+        console.log('Setting agent_name from name property:', (config).name);
         config.agent_name = (config).name;
       }
       

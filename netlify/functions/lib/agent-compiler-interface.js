@@ -20,12 +20,20 @@ class AgentCompilerService {
     }
 
     const agentName = uiConfig.name || 'agent-plugin';
+    // Check if agent_name is already provided in the UI config
+    const existingAgentName = uiConfig.agent_name;
     const agentPersonality = uiConfig.personality || 'helpful';
     const agentInstructions = uiConfig.instructions || 'You are a helpful AI assistant.';
     const agentFeatures = uiConfig.features || {};
     const agentSettings = uiConfig.settings || {};
 
-    console.log('🔧 Extracted values:', { agentName, agentPersonality, agentInstructions });
+    console.log('🔧 Extracted values:', { 
+      agentName, 
+      existingAgentName,
+      hasExistingAgentName: !!existingAgentName,
+      agentPersonality, 
+      agentInstructions 
+    });
 
     if (!agentName || !agentPersonality || !agentInstructions) {
       throw new Error('Missing required UI config fields');
@@ -34,11 +42,16 @@ class AgentCompilerService {
     // Generate a unique ID for the agent
     const agentId = `agent-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
-    // Create the agent_name in URN format that GitHub Actions expects
-    const sanitizedName = agentName.toLowerCase().replace(/\s+/g, '-');
-    const agent_name = `urn:agent:agentify:${sanitizedName}`;
-
-    console.log('🔧 Generated agent_name:', agent_name);
+    // Use existing agent_name if provided, otherwise create one in URN format
+    let agent_name;
+    if (existingAgentName) {
+      agent_name = existingAgentName;
+      console.log('🔧 Using existing agent_name:', agent_name);
+    } else {
+      const sanitizedName = agentName.toLowerCase().replace(/\s+/g, '-');
+      agent_name = `urn:agent:agentify:${sanitizedName}`;
+      console.log('🔧 Generated agent_name:', agent_name);
+    }
 
     // Return the proper AgentPluginConfig format
     const pluginConfig = {

@@ -494,6 +494,13 @@ const CompilerPanel = ({
         }
       };
       
+      // Log the UI config for debugging
+      console.log('🔧 UI config for conversion:', {
+        name: uiConfigForConversion.name,
+        agent_name: uiConfigForConversion.agent_name,
+        hasAgentName: !!uiConfigForConversion.agent_name
+      });
+      
       addLogEntry("Converting UI configuration to compiler format...");
       setCompileProgress(10);
       

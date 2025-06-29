@@ -78,6 +78,14 @@ function convertLibraryFile(filename) {
 // Convert TypeScript syntax to JavaScript
 function convertTypeScriptToJavaScript(content) {
   let converted = content;
+  
+  // Special case for the compile API route - ensure agent_name is included in the UI config
+  if (content.includes('const uiConfigForConversion = {') && content.includes('agentConfig.name')) {
+    converted = converted.replace(
+      /const uiConfigForConversion = \{\s*name: agentConfig\.name,/,
+      'const uiConfigForConversion = {\n      name: agentConfig.name,\n      // Explicitly add agent_name to ensure it\'s available for GitHub Actions compilation\n      agent_name: agentConfig.agent_name || agentConfig.name,'
+    );
+  }
 
   // Remove TypeScript imports and convert to CommonJS
   converted = converted.replace(/^import\s+.*?from\s+['"]([^'"]+)['"];?\s*$/gm, (match, modulePath) => {
@@ -153,7 +161,8 @@ function convertTypeScriptToJavaScript(content) {
         content.includes('targetRun') || content.includes('runs.data') || content.includes('failedJob') ||
         content.includes('Date.now') || content.includes('Math.random') || content.includes('agentName') ||
         content.includes('artifact') || content.includes('run.') || content.includes('job.') ||
-        content.includes('result.') || content.includes('status') || content.includes('pluginArtifact')) {
+        content.includes('result.') || content.includes('status') || content.includes('pluginArtifact') ||
+        content.includes('config.name') || content.includes('(config).name')) {
       return `\`${before}\${${content}}${after}\``;
     }
     return `\`${before}{${content}}${after}\``;
@@ -219,6 +228,7 @@ function convertTypeScriptToJavaScript(content) {
   converted = converted.replace(/failed\$\{/g, 'failed: ${');
   converted = converted.replace(/artifact\$\{/g, 'artifact: ${');
   converted = converted.replace(/step\$\{/g, 'step: ${');
+  converted = converted.replace(/from name property\$\{/g, 'from name property: ${');
 
   // Fix specific template literal patterns that got corrupted
   converted = converted.replace(/\$\$\{/g, '${'); // Fix double dollar signs
@@ -232,6 +242,10 @@ function convertTypeScriptToJavaScript(content) {
   converted = converted.replace(/\$\{Math\.random\(\)\.toString\(36\)\.substring\(2, 2 \+ 9\)\}/g, '${Math.random().toString(36).substring(2, 9)}');
   converted = converted.replace(/`compile-\$\{Date\.now\(\)\}-\$\$\{Math\.random\(\)\.toString\(36\)\.substring\(2, 2 \+ 9\)\}`/g, '`compile-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`');
   converted = converted.replace(/`([^`]*)\$\{([^}]+)\}`/g, '`$1${$2}`'); // Remove extra $ before template literals
+  
+  // Fix specific template literal issues in the GitHub Actions compiler
+  converted = converted.replace(/console\.log\(`Setting agent_name from name property\$\{/g, 'console.log(`Setting agent_name from name property: ${');
+  converted = converted.replace(/console\.log\(`Setting agent_name from name property\${/g, 'console.log(`Setting agent_name from name property: ${');
 
   // Remove empty lines that might have been created
   converted = converted.replace(/\n\s*\n\s*\n/g, '\n\n');
