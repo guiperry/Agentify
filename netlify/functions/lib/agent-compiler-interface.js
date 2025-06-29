@@ -13,14 +13,54 @@ class AgentCompilerService {
    * Convert UI config to plugin config format
    */
   convertUIConfigToPluginConfig(uiConfig) {
+    if (!uiConfig || typeof uiConfig !== 'object') {
+      throw new Error('Invalid UI config');
+    }
+
+    const agentName = uiConfig.name || 'agent-plugin';
+    const agentPersonality = uiConfig.personality || 'helpful';
+    const agentInstructions = uiConfig.instructions || 'You are a helpful AI assistant.';
+    const agentFeatures = uiConfig.features || {};
+    const agentSettings = uiConfig.settings || {};
+
+    if (!agentName || !agentPersonality || !agentInstructions) {
+      throw new Error('Missing required UI config fields');
+    }
+
+    // Generate a unique ID for the agent
+    const agentId = `agent-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+
+    // Create the agent_name in URN format that GitHub Actions expects
+    const sanitizedName = agentName.toLowerCase().replace(/\s+/g, '-');
+    const agent_name = `urn:agent:agentify:${sanitizedName}`;
+
+    // Return the proper AgentPluginConfig format
     return {
-      name: uiConfig.name || 'agent-plugin',
-      personality: uiConfig.personality || 'helpful',
-      instructions: uiConfig.instructions || 'You are a helpful AI assistant.',
-      features: uiConfig.features || [],
-      settings: uiConfig.settings || {},
+      agent_id: agentId,
+      agent_name: agent_name,
+      agentType: 'llm',
+      description: agentInstructions,
+      version: '1.0.0',
+      facts_url: `https://agentify.example.com/agents/${agentId}`,
+      ttl: 3600,
+      signature: 'placeholder-signature',
       buildTarget: 'wasm', // Default to WASM for serverless
-      platform: 'linux'
+      tools: [],
+      resources: [],
+      prompts: [],
+      pythonDependencies: [],
+      useChromemGo: true,
+      subAgentCapabilities: false,
+      trustedExecutionEnvironment: {
+        isolationLevel: 'process',
+        resourceLimits: {
+          memory: 512,
+          cpu: 1,
+          timeLimit: 60
+        },
+        networkAccess: true,
+        fileSystemAccess: false
+      }
     };
   }
 
