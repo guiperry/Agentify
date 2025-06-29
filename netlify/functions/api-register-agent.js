@@ -1,9 +1,34 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/register-agent
-// Generated: 2025-06-29T08:19:49.023Z
+// Generated: 2025-06-29T08:55:09.567Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createClient, SupabaseClient } = require('@supabase/supabase-js');
+
+// Check if Supabase environment variables are available
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+// Initialize Supabase client with error handling
+let supabase;
+
+// Ensure Supabase is properly initialized with error handling
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error('Supabase environment variables are missing. Authentication will not work properly.');
+  throw new Error('Supabase configuration missing. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.');
+} else {
+  // Initialize with actual credentials
+  supabase = createClient(
+    supabaseUrl,
+    supabaseServiceKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    }
+  );
+}
 
 // CORS headers for all responses
 const corsHeaders = {
@@ -54,34 +79,34 @@ async function POST(event, context) {
     }
 
     // Parse request body
-    const { agentId, agentName, agentConfig } = requestBody;
+    const { identity, personality, capabilities } = requestBody;
 
     // Validate required fields
-    if (!agentId || !agentName) {
+    if (!identity || !personality) {
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({error: 'Agent ID and name are required'})
+      body: JSON.stringify({error: 'Identity and personality are required'})
     };
     }
 
     // Insert or update agent record
     const { data, error: insertError } = await supabase
-      .from('user_agents')
+      .from('agent_configs')
       .upsert([
-        { 
+        {
           user_id: user.id,
-          agent_id,
-          agent_name,
-          agent_config: agentConfig || {}
+          identity: identity || {},
+          personality: personality || {},
+          capabilities: capabilities || {}
         }
       ], {
-        onConflict: 'user_id,agent_id'
+        onConflict: 'user_id'
       })
       .select();
 
     if (insertError) {
-      console.error('Agent registration error:', insertError);
+      console.error('Agent config registration error:', insertError);
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
@@ -92,9 +117,9 @@ async function POST(event, context) {
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success: true, 
+      body: JSON.stringify({success: true,
       data: data?.[0],
-      message: 'Agent registered successfully'})
+      message: 'Agent configuration saved successfully'})
     };
   } catch (err) {
     console.error('Agent registration error:', err);
@@ -147,15 +172,15 @@ async function GET(event, context) {
     };
     }
 
-    // Get user's agents
+    // Get user's agent configs
     const { data, error: selectError } = await supabase
-      .from('user_agents')
+      .from('agent_configs')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (selectError) {
-      console.error('Error fetching user agents:', selectError);
+      console.error('Error fetching user agent configs:', selectError);
       return {
       statusCode: 400,
       headers: { "Content-Type": "application/json" },
@@ -166,12 +191,12 @@ async function GET(event, context) {
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({success: true, 
+      body: JSON.stringify({success: true,
       data,
-      message: 'Agents retrieved successfully'})
+      message: 'Agent configurations retrieved successfully'})
     };
   } catch (err) {
-    console.error('Error fetching agents:', err);
+    console.error('Error fetching agent configs:', err);
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },

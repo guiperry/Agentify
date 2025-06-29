@@ -1,8 +1,44 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/agent/process
-// Generated: 2025-06-29T08:19:48.991Z
+// Generated: 2025-06-29T08:55:09.532Z
 
 // NextResponse/NextRequest converted to native Netlify response format
+
+interface AgentConfiguration {
+  name: string;
+  type: string;
+  personality: string;
+  instructions: string;
+  features: string[];
+  agentFacts: any;
+  settings: {
+    creativity: number;
+    mcpServers: any[];
+  };
+}
+
+interface ProcessingStep {
+  id: string;
+  name: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: number;
+  message?: string;
+  error?: string;
+}
+
+interface ProcessingResult {
+  success: boolean;
+  steps: ProcessingStep[];
+  errors?: string[];
+  warnings?: string[];
+  compiledAgent?: {
+    id: string;
+    name: string;
+    version: string;
+    size: string;
+    downloadUrl: string;
+  };
+}
 
 // CORS headers for all responses
 const corsHeaders = {

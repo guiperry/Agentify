@@ -1,8 +1,23 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/deploy
-// Generated: 2025-06-29T08:19:49.018Z
+// Generated: 2025-06-29T08:55:09.562Z
 
 // NextResponse/NextRequest converted to native Netlify response format
+
+interface DeploymentRequest {
+  deploymentId: string;
+  agentName: string;
+  version: string;
+  environment: 'staging' | 'production';
+  deploymentType?: 'cloud' | 'blockchain-aws';
+  pluginUrl?: string;
+  jobId?: string;
+  awsConfig?: {
+    region: string;
+    instanceType: string;
+    keyPairName: string;
+  };
+}
 
 // CORS headers for all responses
 const corsHeaders = {

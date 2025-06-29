@@ -258,13 +258,14 @@ function convertRouteToNetlifyFunction(route) {
 
   const content = fs.readFileSync(route.filePath, 'utf8');
 
-  // Extract imports and exports
+  // Extract imports, initialization code, and exports
   const imports = extractImports(content);
+  const initCode = extractInitializationCode(content);
   const exports = extractExports(content);
-  
+
   // Generate Netlify function
   const functionName = getNetlifyFunctionName(route.routePath);
-  const netlifyFunction = generateNetlifyFunction(route, imports, exports, content);
+  const netlifyFunction = generateNetlifyFunction(route, imports, initCode, exports, content);
   
   return {
     name: functionName,
@@ -310,6 +311,40 @@ function extractImports(content) {
     }
     return `// ${imp} // TODO: Convert this import manually`;
   }).filter(imp => !imp.includes('TODO') && !imp.includes('TypeScript type import')); // Remove TODO and type imports
+}
+
+// Extract initialization code between imports and exports
+function extractInitializationCode(content) {
+  // Find the end of imports
+  const importRegex = /^import\s+.*?from\s+['"][^'"]+['"];?\s*$/gm;
+  let lastImportIndex = 0;
+  let match;
+
+  while ((match = importRegex.exec(content)) !== null) {
+    lastImportIndex = match.index + match[0].length;
+  }
+
+  // Find the start of first export
+  const exportRegex = /export\s+async\s+function\s+(GET|POST|PUT|DELETE|PATCH|OPTIONS)/;
+  const firstExportMatch = content.match(exportRegex);
+  const firstExportIndex = firstExportMatch ? content.indexOf(firstExportMatch[0]) : content.length;
+
+  // Extract the code between imports and exports
+  const initCode = content.substring(lastImportIndex, firstExportIndex).trim();
+
+  if (!initCode) return '';
+
+  // Convert TypeScript syntax to JavaScript
+  let convertedCode = initCode;
+
+  // Remove TypeScript type annotations
+  convertedCode = convertedCode.replace(/:\s*SupabaseClient/g, '');
+  convertedCode = convertedCode.replace(/let\s+(\w+):\s*SupabaseClient;/g, 'let $1;');
+
+  // Convert const declarations with type annotations
+  convertedCode = convertedCode.replace(/const\s+(\w+):\s*[^=]+=/, 'const $1 =');
+
+  return convertedCode;
 }
 
 // Convert Next.js path aliases to relative paths for Netlify functions
@@ -536,9 +571,9 @@ function convertNextJsPatterns(code) {
 }
 
 // Generate Netlify function content
-function generateNetlifyFunction(route, imports, exports, originalContent) {
+function generateNetlifyFunction(route, imports, initCode, exports, originalContent) {
   const functionName = getNetlifyFunctionName(route.routePath);
-  
+
   let netlifyFunction = `// Auto-generated Netlify function from Next.js API route
 // Original route: /api/${route.routePath}
 // Generated: ${new Date().toISOString()}
@@ -548,6 +583,11 @@ function generateNetlifyFunction(route, imports, exports, originalContent) {
   // Add imports (converted to CommonJS)
   if (imports.length > 0) {
     netlifyFunction += imports.join('\n') + '\n\n';
+  }
+
+  // Add initialization code (like Supabase client setup)
+  if (initCode) {
+    netlifyFunction += initCode + '\n\n';
   }
 
   // Add CORS headers helper

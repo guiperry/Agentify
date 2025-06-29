@@ -1,8 +1,40 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/agent/test
-// Generated: 2025-06-29T08:19:48.992Z
+// Generated: 2025-06-29T08:55:09.534Z
 
 // NextResponse/NextRequest converted to native Netlify response format
+
+interface AgentConfiguration {
+  name: string;
+  type: string;
+  personality: string;
+  instructions: string;
+  features: string[];
+  agentFacts: any;
+  settings: {
+    creativity: number;
+    mcpServers: any[];
+  };
+}
+
+interface TestResult {
+  name: string;
+  status: 'passed' | 'failed' | 'skipped';
+  duration: number;
+  error?: string;
+}
+
+interface TestResponse {
+  success: boolean;
+  testResults: {
+    passed: number;
+    failed: number;
+    total: number;
+    coverage: number;
+    details: TestResult[];
+  };
+  logs: string[];
+}
 
 // CORS headers for all responses
 const corsHeaders = {

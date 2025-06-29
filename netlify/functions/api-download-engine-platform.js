@@ -1,10 +1,29 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/download/engine/[platform]
-// Generated: 2025-06-29T08:19:49.019Z
+// Generated: 2025-06-29T08:55:09.563Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { readFile, stat, readdir } = require('fs/promises');
 const { join } = require('path');
+
+// Platform-specific file mappings
+const PLATFORM_FILES = {
+  windows: {
+    pattern: /^agentic-engine.*\.exe$/,
+    contentType: 'application/x-msdownload',
+    extension: '.exe'
+  },
+  mac: {
+    pattern: /^agentic-engine.*\.(dmg|pkg)$/,
+    contentType: 'application/x-apple-diskimage',
+    extension: '.dmg'
+  },
+  linux: {
+    pattern: /^agentic-engine.*\.(AppImage|tar\.gz|deb)$/,
+    contentType: 'application/x-executable',
+    extension: '.AppImage'
+  }
+};
 
 // CORS headers for all responses
 const corsHeaders = {

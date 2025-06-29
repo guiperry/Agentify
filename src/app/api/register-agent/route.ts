@@ -50,43 +50,43 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse request body
-    const { agentId, agentName, agentConfig } = await request.json();
+    const { identity, personality, capabilities } = await request.json();
 
     // Validate required fields
-    if (!agentId || !agentName) {
+    if (!identity || !personality) {
       return NextResponse.json(
-        { error: 'Agent ID and name are required' },
+        { error: 'Identity and personality are required' },
         { status: 400 }
       );
     }
 
     // Insert or update agent record
     const { data, error: insertError } = await supabase
-      .from('user_agents')
+      .from('agent_configs')
       .upsert([
-        { 
+        {
           user_id: user.id,
-          agent_id: agentId,
-          agent_name: agentName,
-          agent_config: agentConfig || {}
+          identity: identity || {},
+          personality: personality || {},
+          capabilities: capabilities || {}
         }
       ], {
-        onConflict: 'user_id,agent_id'
+        onConflict: 'user_id'
       })
       .select();
 
     if (insertError) {
-      console.error('Agent registration error:', insertError);
+      console.error('Agent config registration error:', insertError);
       return NextResponse.json(
         { error: insertError.message },
         { status: 400 }
       );
     }
 
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       data: data?.[0],
-      message: 'Agent registered successfully'
+      message: 'Agent configuration saved successfully'
     });
   } catch (err) {
     console.error('Agent registration error:', err);
@@ -120,28 +120,28 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get user's agents
+    // Get user's agent configs
     const { data, error: selectError } = await supabase
-      .from('user_agents')
+      .from('agent_configs')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (selectError) {
-      console.error('Error fetching user agents:', selectError);
+      console.error('Error fetching user agent configs:', selectError);
       return NextResponse.json(
         { error: selectError.message },
         { status: 400 }
       );
     }
 
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       data: data || [],
-      message: 'Agents retrieved successfully'
+      message: 'Agent configurations retrieved successfully'
     });
   } catch (err) {
-    console.error('Error fetching agents:', err);
+    console.error('Error fetching agent configs:', err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 }

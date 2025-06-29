@@ -1,8 +1,35 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/agent/validate
-// Generated: 2025-06-29T08:19:48.995Z
+// Generated: 2025-06-29T08:55:09.538Z
 
 // NextResponse/NextRequest converted to native Netlify response format
+
+interface AgentFacts {
+  id: string;
+  agent_name: string;
+  capabilities: {
+    modalities: string[];
+    skills: string[];
+  };
+  endpoints: {
+    static: string[];
+    adaptive_resolver: {
+      url: string;
+      policies: string[];
+    };
+  };
+  certification: {
+    level: string;
+    issuer: string;
+    attestations: string[];
+  };
+}
+
+interface ValidationResult {
+  isValid: boolean;
+  errors: Record<string, string>;
+  warnings: Record<string, string>;
+}
 
 // CORS headers for all responses
 const corsHeaders = {
