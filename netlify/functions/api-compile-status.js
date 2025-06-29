@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/compile/status
-// Generated: 2025-06-29T09:07:01.125Z
+// Generated: 2025-06-29T09:48:03.428Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createGitHubActionsCompiler } = require('./lib/github-actions-compiler.js');
@@ -52,7 +52,7 @@ async function GET(event, context) {
 
     console.log(`🔧 GitHub config: owner=${githubOwner}, repo=${githubRepo}, token=${githubToken ? 'configured' : 'missing'}`);
 
-    const githubCompiler = createGitHubActionsCompiler();
+    const githubCompiler = await createGitHubActionsCompiler();
     if (!githubCompiler) {
       console.log('❌ GitHub Actions compiler not available - missing token');
       return {
@@ -117,7 +117,7 @@ async function POST(event, context) {
     };
     }
 
-    const githubCompiler = createGitHubActionsCompiler();
+    const githubCompiler = await createGitHubActionsCompiler();
     if (!githubCompiler) {
       return {
       statusCode: 503,

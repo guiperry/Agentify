@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/compile
-// Generated: 2025-06-29T09:07:01.108Z
+// Generated: 2025-06-29T09:48:03.415Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createAgentCompilerService } = require('./lib/agent-compiler-interface.js');
@@ -138,7 +138,7 @@ async function POST(event, context) {
       await sendCompilationUpdate('compilation', 60, 'Local compilation failed, using GitHub Actions fallback...');
 
       // Try GitHub Actions fallback
-      const githubCompiler = createGitHubActionsCompiler();
+      const githubCompiler = await createGitHubActionsCompiler();
       if (!githubCompiler) {
         console.error('GitHub Actions compiler not available. Missing environment variables.');
         console.error('Required, GITHUB_OWNER, GITHUB_REPO');

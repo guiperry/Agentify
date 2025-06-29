@@ -108,7 +108,7 @@ export async function POST(request: Request) {
       await sendCompilationUpdate('compilation', 60, 'Local compilation failed, using GitHub Actions fallback...');
 
       // Try GitHub Actions fallback
-      const githubCompiler = createGitHubActionsCompiler();
+      const githubCompiler = await createGitHubActionsCompiler();
       if (!githubCompiler) {
         console.error('GitHub Actions compiler not available. Missing environment variables.');
         console.error('Required: GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO');

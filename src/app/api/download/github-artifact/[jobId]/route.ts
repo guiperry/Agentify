@@ -19,7 +19,7 @@ export async function GET(
     }
 
     // Get GitHub Actions compiler
-    const githubCompiler = createGitHubActionsCompiler();
+    const githubCompiler = await createGitHubActionsCompiler();
     if (!githubCompiler) {
       return NextResponse.json(
         { error: 'GitHub Actions compiler not available' },

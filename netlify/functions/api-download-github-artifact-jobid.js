@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/download/github-artifact/[jobId]
-// Generated: 2025-06-29T09:07:01.132Z
+// Generated: 2025-06-29T09:48:03.434Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createGitHubActionsCompiler } = require('./lib/github-actions-compiler.js');
@@ -68,7 +68,7 @@ async function GET(event, context) {
     }
 
     // Get GitHub Actions compiler
-    const githubCompiler = createGitHubActionsCompiler();
+    const githubCompiler = await createGitHubActionsCompiler();
     if (!githubCompiler) {
       return {
       statusCode: 503,

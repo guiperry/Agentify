@@ -81,8 +81,9 @@ function convertTypeScriptToJavaScript(content) {
 
   // Remove TypeScript imports and convert to CommonJS
   converted = converted.replace(/^import\s+.*?from\s+['"]([^'"]+)['"];?\s*$/gm, (match, modulePath) => {
+    // Skip @octokit/rest imports - they will be handled with dynamic imports
     if (modulePath.startsWith('@octokit/')) {
-      return `const { Octokit } = require('${modulePath}');`;
+      return '// @octokit/rest is an ES Module and will be imported dynamically';
     }
     return ''; // Remove other imports that can't be converted
   });
@@ -157,6 +158,67 @@ function convertTypeScriptToJavaScript(content) {
     }
     return `\`${before}{${content}}${after}\``;
   });
+  
+  // Fix specific template literal patterns in console.log statements
+  converted = converted.replace(/console\.log\(`([^`]*){([^}]+)}`\)/g, 'console.log(`$1${$2}`)');
+  converted = converted.replace(/console\.log\(`🎯 Found run by name([^`]+)`\)/g, 'console.log(`🎯 Found run by name: ${run.name}`)');
+  converted = converted.replace(/console\.log\(`🎯 Found run by display title([^`]+)`\)/g, 'console.log(`🎯 Found run by display title: ${run.display_title}`)');
+  converted = converted.replace(/console\.log\(`🎯 Found run by commit message([^`]+)`\)/g, 'console.log(`🎯 Found run by commit message: ${run.head_commit.message}`)');
+  converted = converted.replace(/console\.log\(`❌ No workflow run found for job ID([^`]+)`\)/g, 'console.log(`❌ No workflow run found for job ID: ${jobId}`)');
+  
+  // Fix workflow run template literals
+  converted = converted.replace(/console\.log\(`✅ Found workflow run{targetRun.id} \(([^)]+)\)`\)/g, 'console.log(`✅ Found workflow run: ${targetRun.id} ($1)`)');
+  converted = converted.replace(/console\.log\(`✅ Found workflow run\{targetRun.id\} \(([^)]+)\)`\)/g, 'console.log(`✅ Found workflow run: ${targetRun.id} ($1)`)');
+  
+  // Fix artifact template literals
+  converted = converted.replace(/console\.log\(`  - Artifact{artifact.name} \(([^)]+)\), size: ([^`]+)`\)/g, 'console.log(`  - Artifact: ${artifact.name} ($1), size: $2`)');
+  converted = converted.replace(/console\.log\(`  - Artifact\{artifact.name\} \(([^)]+)\), size: ([^`]+)`\)/g, 'console.log(`  - Artifact: ${artifact.name} ($1), size: $2`)');
+  
+  converted = converted.replace(/console\.log\(`🔍 Using the only available artifact([^`]+)`\)/g, 'console.log(`🔍 Using the only available artifact: ${pluginArtifact.name}`)');
+  
+  // Fix matching artifact template literals
+  converted = converted.replace(/console\.log\(`✅ Found matching artifact{pluginArtifact.name} \(([^)]+)\)`\)/g, 'console.log(`✅ Found matching artifact: ${pluginArtifact.name} ($1)`)');
+  converted = converted.replace(/console\.log\(`✅ Found matching artifact\{pluginArtifact.name\} \(([^)]+)\)`\)/g, 'console.log(`✅ Found matching artifact: ${pluginArtifact.name} ($1)`)');
+  
+  converted = converted.replace(/result\.error = `Compilation failed in step{([^}]+)}`/g, 'result.error = `Compilation failed in step: ${failedJob.name}`');
+  
+  // Fix more specific template literals
+  converted = converted.replace(/console\.log\(`🎯 Found run by name\$\{([^}]+)\}`\)/g, 'console.log(`🎯 Found run by name: ${$1}`)');
+  converted = converted.replace(/console\.log\(`🎯 Found run by display title\$\{([^}]+)\}`\)/g, 'console.log(`🎯 Found run by display title: ${$1}`)');
+  converted = converted.replace(/console\.log\(`🎯 Found run by commit message\$\{([^}]+)\}`\)/g, 'console.log(`🎯 Found run by commit message: ${$1}`)');
+  converted = converted.replace(/console\.log\(`✅ Found workflow run\$\{([^}]+)\}`\)/g, 'console.log(`✅ Found workflow run: ${$1}`)');
+  converted = converted.replace(/console\.log\(`  - Artifact\$\{([^}]+)\}`\)/g, 'console.log(`  - Artifact: ${$1}`)');
+  converted = converted.replace(/console\.log\(`🔍 Using the only available artifact\$\{([^}]+)\}`\)/g, 'console.log(`🔍 Using the only available artifact: ${$1}`)');
+  converted = converted.replace(/console\.log\(`✅ Found matching artifact\$\{([^}]+)\}`\)/g, 'console.log(`✅ Found matching artifact: ${$1}`)');
+  
+  // Fix size template literals
+  converted = converted.replace(/size\$\{/g, 'size: ${');
+  
+  // Fix more template literals
+  converted = converted.replace(/console\.log\(`🚀 Triggering GitHub Actions compilation for "([^"]+)" with job ID([^`]+)`\)/g, 'console.log(`🚀 Triggering GitHub Actions compilation for "$1" with job ID: ${jobId}`)');
+  converted = converted.replace(/console\.log\(`✅ GitHub Actions workflow triggered successfully for job([^`]+)`\)/g, 'console.log(`✅ GitHub Actions workflow triggered successfully for job: ${jobId}`)');
+  converted = converted.replace(/console\.log\(`🔍 Checking GitHub Actions status for job ID([^`]+)`\)/g, 'console.log(`🔍 Checking GitHub Actions status for job ID: ${jobId}`)');
+  converted = converted.replace(/console\.warn\(`⚠️ No matching artifact found for job ID([^`]+)`\)/g, 'console.warn(`⚠️ No matching artifact found for job ID: ${jobId}`)');
+  converted = converted.replace(/throw new Error\(`Failed to trigger workflow([^`]+)`\)/g, 'throw new Error(`Failed to trigger workflow: ${response.status}`)');
+  converted = converted.replace(/throw new Error\(`GitHub Actions compilation trigger failed([^`]+)`\)/g, 'throw new Error(`GitHub Actions compilation trigger failed: ${error instanceof Error ? error.message : String(error)}`)');
+  converted = converted.replace(/throw new Error\(`Failed to download artifact([^`]+)`\)/g, 'throw new Error(`Failed to download artifact: ${error instanceof Error ? error.message : String(error)}`)');
+  converted = converted.replace(/throw new Error\(`Status check failed([^`]+)`\)/g, 'throw new Error(`Status check failed: ${error instanceof Error ? error.message : String(error)}`)');
+  converted = converted.replace(/throw new Error\(`GitHub API client initialization failed([^`]+)`\)/g, 'throw new Error(`GitHub API client initialization failed: ${error instanceof Error ? error.message : String(error)}`)');
+  
+  // Fix more specific template literals
+  converted = converted.replace(/console\.log\(`🚀 Triggering GitHub Actions compilation for "([^"]+)" with job ID\$\{jobId\}`\)/g, 'console.log(`🚀 Triggering GitHub Actions compilation for "$1" with job ID: ${jobId}`)');
+  converted = converted.replace(/console\.log\(`✅ GitHub Actions workflow triggered successfully for job\$\{jobId\}`\)/g, 'console.log(`✅ GitHub Actions workflow triggered successfully for job: ${jobId}`)');
+  converted = converted.replace(/console\.log\(`🔍 Checking GitHub Actions status for job ID\$\{jobId\}`\)/g, 'console.log(`🔍 Checking GitHub Actions status for job ID: ${jobId}`)');
+  converted = converted.replace(/console\.warn\(`⚠️ No matching artifact found for job ID\$\{jobId\}`\)/g, 'console.warn(`⚠️ No matching artifact found for job ID: ${jobId}`)');
+  
+  // Fix template literals with missing colons
+  converted = converted.replace(/with job ID\$\{/g, 'with job ID: ${');
+  converted = converted.replace(/for job\$\{/g, 'for job: ${');
+  converted = converted.replace(/job ID\$\{/g, 'job ID: ${');
+  converted = converted.replace(/workflow\$\{/g, 'workflow: ${');
+  converted = converted.replace(/failed\$\{/g, 'failed: ${');
+  converted = converted.replace(/artifact\$\{/g, 'artifact: ${');
+  converted = converted.replace(/step\$\{/g, 'step: ${');
 
   // Fix specific template literal patterns that got corrupted
   converted = converted.replace(/\$\$\{/g, '${'); // Fix double dollar signs
@@ -185,6 +247,37 @@ function convertTypeScriptToJavaScript(content) {
 
   // Convert class exports to module.exports
   converted = converted.replace(/class\s+(\w+)/g, 'class $1');
+
+  // Fix dynamic imports for @octokit/rest
+  if (converted.includes('await import(\'@octokit/rest\')')) {
+    // Make sure the dynamic import is properly handled
+    converted = converted.replace(
+      /const OctokitModule = await import\(['"]@octokit\/rest['"]\);[\s\S]*?const Octokit = OctokitModule\.Octokit[^;]*;/g,
+      `const OctokitModule = await import('@octokit/rest');
+      const Octokit = OctokitModule.Octokit;
+      
+      if (!Octokit) {
+        throw new Error('Failed to import Octokit from @octokit/rest');
+      }`
+    );
+    
+    // Fix auth parameter in Octokit initialization
+    converted = converted.replace(
+      /this\.octokit = new Octokit\(\{\s*auth,\s*\}\);/g,
+      'this.octokit = new Octokit({\n        auth: githubToken,\n      });'
+    );
+  }
+  
+  // Fix the 'id' variable issue in the compiled JavaScript
+  if (converted.includes('getCompilationStatus') && converted.includes('waitForCompletion')) {
+    // Replace instances of 'id' with 'jobId' in return statements
+    converted = converted.replace(/return\s*{\s*id,/g, 'return { id: jobId,');
+    converted = converted.replace(/id:\s*id,/g, 'id: jobId,');
+    
+    // Fix result object initialization
+    converted = converted.replace(/const result = {\s*id,/g, 'const result = { id: jobId,');
+    converted = converted.replace(/const result = {\s*id:/g, 'const result = { id:');
+  }
 
   // Add module.exports at the end for the main class
   if (converted.includes('class GitHubActionsCompiler')) {

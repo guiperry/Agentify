@@ -1,4 +1,3 @@
-import { Octokit } from '@octokit/rest';
 import type { AgentPluginConfig } from './compiler/agent-compiler-interface';
 
 interface GitHubActionsCompilerOptions {
@@ -19,18 +18,35 @@ interface CompilationJob {
 }
 
 export class GitHubActionsCompiler {
-  private octokit: Octokit;
+  private octokit: any;
   private owner: string;
   private repo: string;
   private workflowId: string;
 
   constructor(options: GitHubActionsCompilerOptions) {
-    this.octokit = new Octokit({
-      auth: options.githubToken,
-    });
     this.owner = options.owner;
     this.repo = options.repo;
     this.workflowId = options.workflowId;
+    // Don't initialize octokit in constructor - do it async
+  }
+
+  async initializeOctokit(githubToken: string) {
+    try {
+      // Use dynamic import for ES Module
+      const OctokitModule = await import('@octokit/rest');
+      const Octokit = OctokitModule.Octokit;
+      
+      if (!Octokit) {
+        throw new Error('Failed to import Octokit from @octokit/rest');
+      }
+      
+      this.octokit = new Octokit({
+        auth: githubToken,
+      });
+    } catch (error) {
+      console.error('Failed to initialize Octokit:', error);
+      throw new Error(`GitHub API client initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**
@@ -38,9 +54,14 @@ export class GitHubActionsCompiler {
    */
   async triggerCompilation(config: AgentPluginConfig): Promise<string> {
     try {
+      // Ensure octokit is initialized
+      if (!this.octokit) {
+        throw new Error('GitHub API client not initialized');
+      }
+
       // Create a unique job ID
       const jobId = `compile-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-      
+
       // Get a sanitized agent name for use in workflow names
       // Extract just the agent name from URN format if present (e.g., "urn:agent:agentify:seal-assist" -> "seal-assist")
       let agentName = config.agent_name || 'unnamed-agent';
@@ -49,7 +70,7 @@ export class GitHubActionsCompiler {
         agentName = parts[parts.length - 1]; // Get the last part after the last colon
       }
       agentName = agentName.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
-      
+
       console.log(`🚀 Triggering GitHub Actions compilation for "${agentName}" with job ID: ${jobId}`);
 
       // Trigger the workflow
@@ -84,6 +105,11 @@ export class GitHubActionsCompiler {
    */
   async getCompilationStatus(jobId: string): Promise<CompilationJob> {
     try {
+      // Ensure octokit is initialized
+      if (!this.octokit) {
+        throw new Error('GitHub API client not initialized');
+      }
+
       console.log(`🔍 Checking GitHub Actions status for job ID: ${jobId}`);
 
       // Get recent workflow runs
@@ -97,7 +123,7 @@ export class GitHubActionsCompiler {
       console.log(`📋 Found ${runs.data.workflow_runs.length} recent workflow runs`);
 
       // Find the run with our job ID - check multiple ways
-      const targetRun = runs.data.workflow_runs.find(run => {
+      const targetRun = runs.data.workflow_runs.find((run: any) => {
         // Check if job ID is in the run name (this should work with our run-name setting)
         if (run.name?.includes(jobId)) {
           console.log(`🎯 Found run by name: ${run.name}`);
@@ -121,7 +147,7 @@ export class GitHubActionsCompiler {
 
       if (!targetRun) {
         console.log(`❌ No workflow run found for job ID: ${jobId}`);
-        console.log('Recent runs:', runs.data.workflow_runs.map(run => ({
+        console.log('Recent runs:', runs.data.workflow_runs.map((run: any) => ({
           id: run.id,
           name: run.name,
           display_title: run.display_title,
@@ -211,19 +237,19 @@ export class GitHubActionsCompiler {
           console.log(`📦 Found ${artifacts.data.artifacts.length} artifacts for run ${targetRun.id}`);
           
           // Log all artifacts for debugging
-          artifacts.data.artifacts.forEach(artifact => {
+          artifacts.data.artifacts.forEach((artifact: any) => {
             console.log(`  - Artifact: ${artifact.name} (${artifact.id}), size: ${artifact.size_in_bytes} bytes`);
           });
 
           // Try to find the artifact with multiple strategies
-          let pluginArtifact = artifacts.data.artifacts.find(artifact => 
+          let pluginArtifact = artifacts.data.artifacts.find((artifact: any) => 
             // First try: includes jobId (most specific)
             artifact.name.includes(jobId)
           );
           
           // If not found, try more generic matching
           if (!pluginArtifact) {
-            pluginArtifact = artifacts.data.artifacts.find(artifact =>
+            pluginArtifact = artifacts.data.artifacts.find((artifact: any) =>
               // Second try: includes 'plugin'
               artifact.name.includes('plugin') ||
               // Third try: includes 'agent'
@@ -267,7 +293,7 @@ export class GitHubActionsCompiler {
             run_id: targetRun.id
           });
 
-          const failedJob = jobs.data.jobs.find(job => job.conclusion === 'failure');
+          const failedJob = jobs.data.jobs.find((job: any) => job.conclusion === 'failure');
           if (failedJob) {
             result.error = `Compilation failed in step: ${failedJob.name}`;
           }
@@ -327,7 +353,7 @@ export class GitHubActionsCompiler {
 /**
  * Create a GitHub Actions compiler instance
  */
-export function createGitHubActionsCompiler(): GitHubActionsCompiler | null {
+export async function createGitHubActionsCompiler(): Promise<GitHubActionsCompiler | null> {
   const githubToken = process.env.GITHUB_TOKEN;
   const owner = process.env.GITHUB_OWNER || 'guiperry';
   const repo = process.env.GITHUB_REPO || 'next-agentify';
@@ -338,10 +364,15 @@ export function createGitHubActionsCompiler(): GitHubActionsCompiler | null {
     return null;
   }
 
-  return new GitHubActionsCompiler({
+  const compiler = new GitHubActionsCompiler({
     githubToken,
     owner,
     repo,
     workflowId
   });
+
+  // Initialize the octokit client
+  await compiler.initializeOctokit(githubToken);
+
+  return compiler;
 }

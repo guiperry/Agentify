@@ -23,7 +23,7 @@ export async function GET(request: Request) {
 
     console.log(`🔧 GitHub config: owner=${githubOwner}, repo=${githubRepo}, token=${githubToken ? 'configured' : 'missing'}`);
 
-    const githubCompiler = createGitHubActionsCompiler();
+    const githubCompiler = await createGitHubActionsCompiler();
     if (!githubCompiler) {
       console.log('❌ GitHub Actions compiler not available - missing token');
       return NextResponse.json({
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
-    const githubCompiler = createGitHubActionsCompiler();
+    const githubCompiler = await createGitHubActionsCompiler();
     if (!githubCompiler) {
       return NextResponse.json({
         success: false,

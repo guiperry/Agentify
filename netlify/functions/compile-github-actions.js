@@ -102,7 +102,7 @@ exports.handler = async (event, context) => {
       }
 
       // Create GitHub Actions compiler
-      const githubCompiler = createGitHubActionsCompiler();
+      const githubCompiler = await createGitHubActionsCompiler();
       if (!githubCompiler) {
         return {
           statusCode: 500,
