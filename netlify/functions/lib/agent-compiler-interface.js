@@ -13,7 +13,7 @@ class AgentCompilerService {
    * Convert UI config to plugin config format
    */
   convertUIConfigToPluginConfig(uiConfig) {
-    console.log('🔧 convertUIConfigToPluginConfig called with:', JSON.stringify(uiConfig, null, 2));
+    console.log('🔧 [FIXED] convertUIConfigToPluginConfig called with:', JSON.stringify(uiConfig, null, 2));
 
     if (!uiConfig || typeof uiConfig !== 'object') {
       throw new Error('Invalid UI config');
