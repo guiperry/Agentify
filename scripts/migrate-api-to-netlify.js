@@ -79,6 +79,10 @@ function convertLibraryFile(filename) {
 function convertTypeScriptToJavaScript(content) {
   let converted = content;
   
+  // Fix TypeScript function parameters
+  converted = converted.replace(/async\s+function\s+getUser\s*\(\s*token\s*:\s*string\s*\|\s*null\s*\)/g, 'async function getUser(token)');
+  converted = converted.replace(/function\s+getUser\s*\(\s*token\s*:\s*string\s*\|\s*null\s*\)/g, 'function getUser(token)');
+  
   // Special case for the compile API route - ensure agent_name is included in the UI config
   if (content.includes('const uiConfigForConversion = {') && content.includes('agentConfig.name')) {
     converted = converted.replace(
@@ -621,6 +625,98 @@ function convertNextJsToNetlify(method, functionBody, params = '') {
 // Convert Next.js specific patterns to Netlify equivalents
 function convertNextJsPatterns(code) {
   let convertedCode = code;
+
+  // Special handling for SSE (Server-Sent Events) implementation
+  if (code.includes('TransformStream') && code.includes('text/event-stream')) {
+    // This is an SSE implementation, convert it to Netlify-compatible format
+    return `
+  // Get token from query params
+  const token = event.queryStringParameters?.token;
+  
+  // Verify user authentication
+  const { user, error } = await getUser(token);
+  
+  if (error || !user) {
+    return {
+      statusCode: 401,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: 'Unauthorized' })
+    };
+  }
+
+  // Set up SSE response headers
+  const responseHeaders = {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+  };
+  
+  // Create initial connection message
+  const initialMessage = {
+    type: 'connection',
+    data: { status: 'connected', userId: user.id },
+    timestamp: new Date().toISOString()
+  };
+  
+  // Format the SSE message
+  const formattedMessage = \`data: \${JSON.stringify(initialMessage)}\n\n\`;
+  
+  // Return the SSE response
+  return {
+    statusCode: 200,
+    headers: responseHeaders,
+    body: formattedMessage
+  };`;
+  }
+  
+  // Special handling for the stream API route
+  if (code.includes('request.nextUrl.searchParams.get') && code.includes('text/event-stream')) {
+    // This is the stream API route, convert it to Netlify-compatible format
+    return `
+  // Get token from query params
+  const token = event.queryStringParameters?.token;
+  
+  // Verify user authentication
+  const { user, error } = await getUser(token);
+  
+  if (error || !user) {
+    return {
+      statusCode: 401,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: 'Unauthorized' })
+    };
+  }
+
+  // Set up SSE response headers
+  const responseHeaders = {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+  };
+  
+  // Create initial connection message
+  const initialMessage = {
+    type: 'connection',
+    data: { status: 'connected', userId: user.id },
+    timestamp: new Date().toISOString()
+  };
+  
+  // Format the SSE message
+  const formattedMessage = \`data: \${JSON.stringify(initialMessage)}\n\n\`;
+  
+  // Return the SSE response
+  return {
+    statusCode: 200,
+    headers: responseHeaders,
+    body: formattedMessage
+  };`;
+  }
 
   // Handle return NextResponse.json() patterns with better multi-line support
   convertedCode = convertedCode.replace(

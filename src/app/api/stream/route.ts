@@ -41,6 +41,9 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // For Netlify compatibility, we need to handle SSE differently
+  // This implementation will be transformed by the migration script
+  
   // Create a TransformStream to handle SSE
   const encoder = new TextEncoder();
   const stream = new TransformStream();

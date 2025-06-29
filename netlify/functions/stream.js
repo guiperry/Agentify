@@ -112,8 +112,19 @@ exports.handler = async (event, context) => {
   // Handle GET requests for SSE stream
   if (event.httpMethod === 'GET') {
     try {
+      console.log(`SSE connection established for user: ${user.id}`);
+      
       // Get user's agent config
       const config = await getUserAgentConfig(user.id);
+      
+      // Log connection details
+      console.log(`SSE connection details:`, {
+        userId: user.id,
+        hasConfig: !!config,
+        origin: event.headers.origin || event.headers.Origin || 'unknown',
+        referer: event.headers.referer || event.headers.Referer || 'unknown',
+        userAgent: event.headers['user-agent'] || event.headers['User-Agent'] || 'unknown'
+      });
       
       // Create SSE response with connection confirmation
       const sseData = JSON.stringify({
@@ -132,6 +143,15 @@ exports.handler = async (event, context) => {
         body: response
       };
     } catch (error) {
+      console.error('Error in SSE stream handler:', error);
+      console.error('SSE error details:', {
+        userId: user?.id || 'unknown',
+        errorMessage: error.message,
+        errorStack: error.stack,
+        origin: event.headers.origin || event.headers.Origin || 'unknown',
+        referer: event.headers.referer || event.headers.Referer || 'unknown'
+      });
+      
       const errorData = JSON.stringify({
         type: 'error',
         message: error.message,

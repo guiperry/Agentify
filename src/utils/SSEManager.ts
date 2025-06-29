@@ -96,8 +96,16 @@ export class SSEManager {
       (window.location.hostname.includes('netlify.app') || 
        window.location.hostname.includes('agentify-nextjs.netlify.app'));
     
-    const baseUrl = process.env.NEXT_PUBLIC_SSE_URL || 
-      (isNetlify ? '/.netlify/functions/stream' : '/api/stream');
+    // CRITICAL FIX: Always use the Netlify function endpoint for SSE in production
+    // This ensures we're using the correct endpoint that's properly implemented for SSE
+    let baseUrl = process.env.NEXT_PUBLIC_SSE_URL || '/api/stream';
+    
+    // CRITICAL FIX: Always use the Netlify function endpoint in production
+    // This ensures we're using the correct endpoint that's properly implemented for SSE
+    if (isNetlify || window.location.hostname.includes('netlify') || process.env.NEXT_PUBLIC_NETLIFY_CONTEXT) {
+      console.log('Detected Netlify environment, using /.netlify/functions/stream endpoint');
+      baseUrl = '/.netlify/functions/stream';
+    }
     
     console.log(`Using SSE endpoint: ${baseUrl} (Netlify environment: ${isNetlify})`);
     const sseUrl = authToken ? `${baseUrl}?token=${authToken}` : baseUrl;
@@ -121,6 +129,15 @@ export class SSEManager {
 
       this.sseClient.on('error', (err: any) => {
         console.error('SSE connection error:', err);
+        
+        // Log more detailed error information
+        console.error('SSE connection error details:', {
+          endpoint: sseUrl,
+          isNetlify: isNetlify,
+          hostname: typeof window !== 'undefined' ? window.location.hostname : 'unknown',
+          netlifyContext: process.env.NEXT_PUBLIC_NETLIFY_CONTEXT || 'unknown'
+        });
+        
         this.isConnecting = false;
         this.connectionStatus = 'error';
         this.notifyStatusListeners();
@@ -172,10 +189,22 @@ export class SSEManager {
     if (this.reconnectAttempts < this.maxReconnectAttempts && this.listeners.size > 0) {
       const delay = Math.pow(2, this.reconnectAttempts) * 1000;
       this.reconnectAttempts++;
-      console.log(`SSE reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
+      
+      // Log more detailed reconnection information
+      console.log(`SSE reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`, {
+        listeners: this.listeners.size,
+        isNetlify: typeof window !== 'undefined' && 
+          (window.location.hostname.includes('netlify.app') || 
+           window.location.hostname.includes('agentify-nextjs.netlify.app')),
+        hostname: typeof window !== 'undefined' ? window.location.hostname : 'unknown',
+        netlifyContext: process.env.NEXT_PUBLIC_NETLIFY_CONTEXT || 'unknown',
+        sseUrl: process.env.NEXT_PUBLIC_SSE_URL || 'not set'
+      });
+      
       this.reconnectTimeout = setTimeout(() => {
         // Check if we still have listeners before attempting to reconnect
         if (this.listeners.size > 0) {
+          console.log('Attempting SSE reconnection...');
           this.connect();
         } else {
           console.log('No active SSE listeners, canceling reconnection attempts');

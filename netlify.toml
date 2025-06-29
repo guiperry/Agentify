@@ -49,7 +49,8 @@
   FORCE_COLOR = "1"
 
   # SSE Configuration (for real-time updates)
-  NEXT_PUBLIC_SSE_URL = "/api/stream"
+  # CRITICAL FIX: Use the direct Netlify function path for SSE
+  NEXT_PUBLIC_SSE_URL = "/.netlify/functions/stream"
   
   # Environment indicator for client-side API routing
   NEXT_PUBLIC_NETLIFY_CONTEXT = "production"

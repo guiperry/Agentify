@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/download/github-artifact/[jobId]
-// Generated: 2025-06-29T10:56:09.858Z
+// Generated: 2025-06-29T11:16:38.463Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createGitHubActionsCompiler } = require('./lib/github-actions-compiler.js');
