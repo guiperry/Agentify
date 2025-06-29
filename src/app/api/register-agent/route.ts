@@ -1,17 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Initialize Supabase client with service role for server-side operations
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
+// Check if Supabase environment variables are available
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+// Initialize Supabase client with error handling
+let supabase: SupabaseClient;
+
+// Ensure Supabase is properly initialized with error handling
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error('Supabase environment variables are missing. Authentication will not work properly.');
+  throw new Error('Supabase configuration missing. Please set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables.');
+} else {
+  // Initialize with actual credentials
+  supabase = createClient(
+    supabaseUrl,
+    supabaseServiceKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
     }
-  }
-);
+  );
+}
 
 export async function POST(request: NextRequest) {
   try {

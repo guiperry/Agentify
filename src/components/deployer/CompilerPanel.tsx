@@ -249,7 +249,12 @@ const CompilerPanel = ({
     addLogEntry("Compiler panel ready. Backend will handle compilation and dependency checks.");
     
     // Check if the backend server is available
-    fetch('/api/health')
+    // Determine the correct API endpoint based on environment
+    const healthEndpoint = process.env.NEXT_PUBLIC_NETLIFY_CONTEXT === 'production' 
+      ? '/.netlify/functions/api-health'
+      : '/api/health';
+      
+    fetch(healthEndpoint)
       .then(res => res.json())
       .then(data => {
         if (data.status === 'ok') {
@@ -275,7 +280,10 @@ const CompilerPanel = ({
         addLogEntry(`🔍 Checking compilation status... (${attempts + 1}/${maxAttempts})`);
         console.log(`🔍 Making status request for job: ${jobId}, attempt: ${attempts + 1}`);
 
-        const statusUrl = `/api/compile/status?jobId=${encodeURIComponent(jobId)}`;
+        // Determine the correct API endpoint based on environment
+        const statusUrl = process.env.NEXT_PUBLIC_NETLIFY_CONTEXT === 'production' 
+          ? `/.netlify/functions/api-compile-status?jobId=${encodeURIComponent(jobId)}`
+          : `/api/compile/status?jobId=${encodeURIComponent(jobId)}`;
         console.log(`🔍 Status URL: ${statusUrl}`);
 
         const statusResponse = await fetch(statusUrl);
@@ -510,7 +518,12 @@ const CompilerPanel = ({
       setCompileProgress(20);
 
       try {
-        const response = await fetch('/api/compile', {
+        // Determine the correct API endpoint based on environment
+        const compileEndpoint = process.env.NEXT_PUBLIC_NETLIFY_CONTEXT === 'production' 
+          ? '/.netlify/functions/api-compile'
+          : '/api/compile';
+          
+        const response = await fetch(compileEndpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

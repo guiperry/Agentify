@@ -50,8 +50,14 @@
 
   # SSE Configuration (for real-time updates)
   NEXT_PUBLIC_SSE_URL = "/api/stream"
+  
+  # Environment indicator for client-side API routing
+  NEXT_PUBLIC_NETLIFY_CONTEXT = "production"
 
   # Supabase Configuration (set these in Netlify UI for security)
+  # IMPORTANT: These environment variables MUST be set in the Netlify UI
+  # under Site settings > Build & deploy > Environment variables
+  # DO NOT uncomment these lines - they are shown here as documentation only
   # NEXT_PUBLIC_SUPABASE_URL = "https://your-project.supabase.co"
   # NEXT_PUBLIC_SUPABASE_ANON_KEY = "your-anon-key"
   # SUPABASE_SERVICE_ROLE_KEY = "your-service-role-key"

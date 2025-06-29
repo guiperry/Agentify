@@ -1,21 +1,9 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/register-agent
-// Generated: 2025-06-29T03:38:56.062Z
+// Generated: 2025-06-29T08:19:49.023Z
 
 // NextResponse/NextRequest converted to native Netlify response format
-const { createClient } = require('@supabase/supabase-js');
-
-// Initialize Supabase client with service role for server-side operations
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-);
+const { createClient, SupabaseClient } = require('@supabase/supabase-js');
 
 // CORS headers for all responses
 const corsHeaders = {
@@ -209,15 +197,14 @@ async function OPTIONS(event, context) {
   }
   
 
-  return {
-    statusCode: 200,
+  return new NextResponse(null, {
+    status: 200,
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     },
-    body: ''
-  };
+  });
 }
 
 // Main Netlify function handler

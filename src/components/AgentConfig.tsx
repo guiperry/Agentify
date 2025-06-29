@@ -546,12 +546,24 @@ const AgentConfig = ({
     }
 
     try {
+      // Check if auth and user are available
+      if (!auth || !auth.user || !auth.user.accessToken) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      
+      // Determine the correct API endpoint based on environment
+      // In production (Netlify), use the Netlify function path
+      // In development, use the Next.js API route
+      const apiEndpoint = process.env.NEXT_PUBLIC_NETLIFY_CONTEXT === 'production' 
+        ? '/.netlify/functions/api-register-agent'
+        : '/api/register-agent';
+        
       // Call the registration API
-      const response = await fetch('/api/register-agent', {
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${auth.user?.accessToken}`
+          'Authorization': `Bearer ${auth.user.accessToken}`
         },
         body: JSON.stringify({
           agentId: agentFacts.id,
@@ -611,12 +623,24 @@ const AgentConfig = ({
   const handleLoginSuccess = async () => {
     // Automatically trigger agent registration after successful login
     try {
+      // Check if auth and user are available
+      if (!auth || !auth.user || !auth.user.accessToken) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      
+      // Determine the correct API endpoint based on environment
+      // In production (Netlify), use the Netlify function path
+      // In development, use the Next.js API route
+      const apiEndpoint = process.env.NEXT_PUBLIC_NETLIFY_CONTEXT === 'production' 
+        ? '/.netlify/functions/api-register-agent'
+        : '/api/register-agent';
+        
       // Call the registration API
-      const response = await fetch('/api/register-agent', {
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${auth.user?.accessToken}`
+          'Authorization': `Bearer ${auth.user.accessToken}`
         },
         body: JSON.stringify({
           agentId: agentFacts.id,
@@ -997,8 +1021,13 @@ const AgentConfig = ({
       console.log('🔧 Button state set to processing: true');
 
       if (sseConnected) {
+        // Determine the correct API endpoint based on environment
+        const compileEndpoint = process.env.NEXT_PUBLIC_NETLIFY_CONTEXT === 'production' 
+          ? '/.netlify/functions/api-compile-stream'
+          : '/api/compile-stream';
+          
         // Send process configuration request via SSE
-        fetch('/api/compile-stream', {
+        fetch(compileEndpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

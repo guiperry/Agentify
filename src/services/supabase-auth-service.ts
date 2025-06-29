@@ -1,10 +1,84 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, Session, User as SupabaseUser, AuthError } from '@supabase/supabase-js';
 
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+// Define the callback type for auth state changes
+type AuthStateChangeCallback = (event: string, session: Session | null) => void;
+
+// Define a type for our mock Supabase client to ensure type safety
+interface MockSupabaseClient {
+  auth: {
+    getSession: () => Promise<{ data: { session: Session | null }, error: Error | null }>;
+    getUser: () => Promise<{ data: { user: SupabaseUser | null, session: Session | null }, error: Error | null }>;
+    signInWithIdToken: (params: any) => Promise<{ data: { user: SupabaseUser | null, session: Session | null }, error: Error | null }>;
+    signInWithPassword: (params: any) => Promise<{ data: { user: SupabaseUser | null, session: Session | null }, error: Error | null }>;
+    signUp: (params: any) => Promise<{ data: { user: SupabaseUser | null, session: Session | null }, error: Error | null }>;
+    signOut: () => Promise<{ error: Error | null }>;
+    onAuthStateChange: (callback: AuthStateChangeCallback) => 
+      { data: { subscription: { unsubscribe: () => void } } };
+  };
+  from: (table: string) => {
+    select: (columns?: string) => Promise<{ data: any | null, error: Error | null }>;
+    insert: (data: any) => Promise<{ data: any | null, error: Error | null }>;
+    upsert: (data: any) => Promise<{ data: any | null, error: Error | null }>;
+    update: (data: any) => Promise<{ data: any | null, error: Error | null }>;
+    delete: () => Promise<{ data: any | null, error: Error | null }>;
+  };
+}
+
+// Check if Supabase environment variables are available
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+// Initialize Supabase client with error handling
+let supabase: SupabaseClient | MockSupabaseClient;
+
+try {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error('Supabase environment variables are missing. Authentication will not work properly.');
+    // Create a dummy client that will throw clear errors when used
+    supabase = {
+      auth: {
+        getSession: () => Promise.resolve({ data: { session: null }, error: new Error('Supabase configuration missing') }),
+        getUser: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase configuration missing') }),
+        signInWithIdToken: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase configuration missing') }),
+        signInWithPassword: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase configuration missing') }),
+        signUp: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase configuration missing') }),
+        signOut: () => Promise.resolve({ error: null }),
+        onAuthStateChange: (callback: AuthStateChangeCallback) => ({ data: { subscription: { unsubscribe: () => {} } } })
+      },
+      from: () => ({
+        select: () => Promise.resolve({ data: null, error: new Error('Supabase configuration missing') }),
+        insert: () => Promise.resolve({ data: null, error: new Error('Supabase configuration missing') }),
+        upsert: () => Promise.resolve({ data: null, error: new Error('Supabase configuration missing') }),
+        update: () => Promise.resolve({ data: null, error: new Error('Supabase configuration missing') }),
+        delete: () => Promise.resolve({ data: null, error: new Error('Supabase configuration missing') }),
+      })
+    };
+  } else {
+    // Initialize with actual credentials
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+  }
+} catch (error) {
+  console.error('Failed to initialize Supabase client:', error);
+  // Provide a fallback that won't crash the app
+  supabase = {
+    auth: {
+      getSession: () => Promise.resolve({ data: { session: null }, error: new Error('Supabase initialization failed') }),
+      getUser: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase initialization failed') }),
+      signInWithIdToken: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase initialization failed') }),
+      signInWithPassword: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase initialization failed') }),
+      signUp: () => Promise.resolve({ data: { user: null, session: null }, error: new Error('Supabase initialization failed') }),
+      signOut: () => Promise.resolve({ error: null }),
+      onAuthStateChange: (callback: AuthStateChangeCallback) => ({ data: { subscription: { unsubscribe: () => {} } } })
+    },
+    from: () => ({
+      select: () => Promise.resolve({ data: null, error: new Error('Supabase initialization failed') }),
+      insert: () => Promise.resolve({ data: null, error: new Error('Supabase initialization failed') }),
+      upsert: () => Promise.resolve({ data: null, error: new Error('Supabase initialization failed') }),
+      update: () => Promise.resolve({ data: null, error: new Error('Supabase initialization failed') }),
+      delete: () => Promise.resolve({ data: null, error: new Error('Supabase initialization failed') }),
+    })
+  };
+}
 
 // Types for authentication
 export interface User {
@@ -55,7 +129,7 @@ class SupabaseAuthService {
       }
 
       // Listen for auth changes
-      supabase.auth.onAuthStateChange((event, session) => {
+      supabase.auth.onAuthStateChange((event: string, session: Session | null) => {
         if (event === 'SIGNED_IN' && session?.user) {
           this.currentUser = this.mapSupabaseUserToUser(session.user, session.access_token);
           this.notifyListeners(this.getAuthState());
@@ -70,7 +144,7 @@ class SupabaseAuthService {
   }
 
   // Map Supabase user to our User interface
-  private mapSupabaseUserToUser(supabaseUser: any, accessToken: string): User {
+  private mapSupabaseUserToUser(supabaseUser: SupabaseUser, accessToken: string): User {
     return {
       id: supabaseUser.id,
       email: supabaseUser.email || '',
