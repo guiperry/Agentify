@@ -64,11 +64,31 @@ export class GitHubActionsCompiler {
 
       // Get a sanitized agent name for use in workflow names
       // Extract just the agent name from URN format if present (e.g., "urn:agent:agentify:seal-assist" -> "seal-assist")
-      let agentName = config.agent_name || 'unnamed-agent';
+      // First check if agent_name exists, if not try to use name property instead
+      let agentName: string;
+      
+      // Log the incoming config for debugging
+      console.log('GitHub Actions compiler received config:', {
+        hasAgentName: !!config.agent_name,
+        hasName: !!(config as any).name,
+        agentName: config.agent_name || (config as any).name || 'undefined'
+      });
+      
+      // If agent_name is missing but name exists, use that instead
+      if (!config.agent_name && (config as any).name) {
+        console.log(`Setting agent_name from name property: ${(config as any).name}`);
+        config.agent_name = (config as any).name;
+      }
+      
+      // Now use agent_name with fallback
+      agentName = config.agent_name || 'unnamed-agent';
+      
+      // Extract just the agent name from URN format if present
       if (agentName.startsWith('urn:agent:')) {
         const parts = agentName.split(':');
         agentName = parts[parts.length - 1]; // Get the last part after the last colon
       }
+      
       agentName = agentName.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 30);
 
       console.log(`🚀 Triggering GitHub Actions compilation for "${agentName}" with job ID: ${jobId}`);

@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/compile
-// Generated: 2025-06-29T09:48:03.415Z
+// Generated: 2025-06-29T10:13:21.029Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createAgentCompilerService } = require('./lib/agent-compiler-interface.js');
@@ -147,6 +147,20 @@ async function POST(event, context) {
 
       try {
         await sendCompilationUpdate('compilation', 70, 'Triggering GitHub Actions compilation...');
+        
+        // Ensure agent_name is set in the plugin configuration
+        if (!pluginConfig.agent_name && (pluginConfig).name) {
+          console.log('Setting agent_name from name property:', (pluginConfig).name);
+          pluginConfig.agent_name = (pluginConfig).name;
+        }
+        
+        // Log the configuration for debugging
+        console.log('Plugin configuration before GitHub Actions:', {
+          name: (pluginConfig).name,
+          agent_name: pluginConfig.agent_name,
+          hasAgentName: !!pluginConfig.agent_name
+        });
+        
         const jobId = await githubCompiler.triggerCompilation(pluginConfig);
 
         await sendCompilationUpdate('compilation', 80, 'GitHub Actions compilation started. Check GitHub Actions tab for progress...');

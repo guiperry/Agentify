@@ -13,6 +13,8 @@ class AgentCompilerService {
    * Convert UI config to plugin config format
    */
   convertUIConfigToPluginConfig(uiConfig) {
+    console.log('🔧 convertUIConfigToPluginConfig called with:', JSON.stringify(uiConfig, null, 2));
+
     if (!uiConfig || typeof uiConfig !== 'object') {
       throw new Error('Invalid UI config');
     }
@@ -22,6 +24,8 @@ class AgentCompilerService {
     const agentInstructions = uiConfig.instructions || 'You are a helpful AI assistant.';
     const agentFeatures = uiConfig.features || {};
     const agentSettings = uiConfig.settings || {};
+
+    console.log('🔧 Extracted values:', { agentName, agentPersonality, agentInstructions });
 
     if (!agentName || !agentPersonality || !agentInstructions) {
       throw new Error('Missing required UI config fields');
@@ -34,8 +38,10 @@ class AgentCompilerService {
     const sanitizedName = agentName.toLowerCase().replace(/\s+/g, '-');
     const agent_name = `urn:agent:agentify:${sanitizedName}`;
 
+    console.log('🔧 Generated agent_name:', agent_name);
+
     // Return the proper AgentPluginConfig format
-    return {
+    const pluginConfig = {
       agent_id: agentId,
       agent_name: agent_name,
       agentType: 'llm',
@@ -62,6 +68,9 @@ class AgentCompilerService {
         fileSystemAccess: false
       }
     };
+
+    console.log('🔧 Returning pluginConfig with agent_name:', pluginConfig.agent_name);
+    return pluginConfig;
   }
 
   /**

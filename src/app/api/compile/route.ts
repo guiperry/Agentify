@@ -117,6 +117,20 @@ export async function POST(request: Request) {
 
       try {
         await sendCompilationUpdate('compilation', 70, 'Triggering GitHub Actions compilation...');
+        
+        // Ensure agent_name is set in the plugin configuration
+        if (!pluginConfig.agent_name && (pluginConfig as any).name) {
+          console.log('Setting agent_name from name property:', (pluginConfig as any).name);
+          pluginConfig.agent_name = (pluginConfig as any).name;
+        }
+        
+        // Log the configuration for debugging
+        console.log('Plugin configuration before GitHub Actions:', {
+          name: (pluginConfig as any).name,
+          agent_name: pluginConfig.agent_name,
+          hasAgentName: !!pluginConfig.agent_name
+        });
+        
         const jobId = await githubCompiler.triggerCompilation(pluginConfig);
 
         await sendCompilationUpdate('compilation', 80, 'GitHub Actions compilation started. Check GitHub Actions tab for progress...');
