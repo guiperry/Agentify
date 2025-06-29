@@ -83,7 +83,7 @@ function convertTypeScriptToJavaScript(content) {
   if (content.includes('const uiConfigForConversion = {') && content.includes('agentConfig.name')) {
     converted = converted.replace(
       /const uiConfigForConversion = \{\s*name: agentConfig\.name,/,
-      'const uiConfigForConversion = {\n      name: agentConfig.name,\n      // Explicitly add agent_name to ensure it\'s available for GitHub Actions compilation\n      agent_name: agentConfig.agent_name || agentConfig.name,'
+      'const uiConfigForConversion = {\n      name: agentConfig.name,\n      // CRITICAL FIX: Explicitly add agent_name to ensure it\'s available for GitHub Actions compilation\n      agent_name: agentConfig.agent_name || agentConfig.name || `agent-${Date.now()}`,'
     );
   }
 
@@ -246,6 +246,19 @@ function convertTypeScriptToJavaScript(content) {
   // Fix specific template literal issues in the GitHub Actions compiler
   converted = converted.replace(/console\.log\(`Setting agent_name from name property\$\{/g, 'console.log(`Setting agent_name from name property: ${');
   converted = converted.replace(/console\.log\(`Setting agent_name from name property\${/g, 'console.log(`Setting agent_name from name property: ${');
+  
+  // CRITICAL FIX: Ensure the GitHub Actions compiler always sets agent_name
+  // Replace the simple if check with a more robust one that handles missing agent_name
+  converted = converted.replace(
+    /\/\/ If agent_name is missing but name exists, use that instead\s*if \(!config\.agent_name && \(config\)\.name\) \{/g,
+    '// CRITICAL FIX: Ensure agent_name is always defined\n      // If agent_name is missing but name exists, use that instead\n      if (!config.agent_name) {\n        if ((config).name) {'
+  );
+  
+  // Add the else block to set a default agent_name if both are missing
+  converted = converted.replace(
+    /console\.log\(`Setting agent_name from name property: \$\{.*?\}`\);\s*config\.agent_name = \(config\)\.name;\s*\}/g,
+    'console.log(`Setting agent_name from name property: ${(config).name}`);\n        config.agent_name = (config).name;\n      } else {\n        // If neither agent_name nor name exists, set a default value\n        console.log(`Setting default agent_name as both agent_name and name are missing`);\n        config.agent_name = `agent-${Date.now()}`;\n      }\n    }'
+  );
 
   // Remove empty lines that might have been created
   converted = converted.replace(/\n\s*\n\s*\n/g, '\n\n');

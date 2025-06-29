@@ -251,6 +251,7 @@ export async function createAgentCompilerService(): Promise<AgentCompilerService
       // Create the basic configuration
       const agentConfig: AgentPluginConfig = {
         agent_id: agentId,
+        // CRITICAL FIX: Ensure agent_name is always defined
         // Use existing agent_name if provided, otherwise generate one from the name
         agent_name: existingAgentName || `urn:agent:agentify:${agentName.toLowerCase().replace(/\s+/g, '-')}`,
         agentType: 'llm',

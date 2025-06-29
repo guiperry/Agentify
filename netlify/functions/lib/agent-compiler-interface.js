@@ -42,15 +42,20 @@ class AgentCompilerService {
     // Generate a unique ID for the agent
     const agentId = `agent-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
+    // CRITICAL FIX: Ensure agent_name is always defined
     // Use existing agent_name if provided, otherwise create one in URN format
     let agent_name;
     if (existingAgentName) {
       agent_name = existingAgentName;
       console.log('🔧 Using existing agent_name:', agent_name);
-    } else {
+    } else if (agentName) {
       const sanitizedName = agentName.toLowerCase().replace(/\s+/g, '-');
       agent_name = `urn:agent:agentify:${sanitizedName}`;
-      console.log('🔧 Generated agent_name:', agent_name);
+      console.log('🔧 Generated agent_name from name:', agent_name);
+    } else {
+      // If neither agent_name nor name exists, set a default value
+      agent_name = `agent-${Date.now()}`;
+      console.log('🔧 Using default agent_name as both agent_name and name are missing:', agent_name);
     }
 
     // Return the proper AgentPluginConfig format

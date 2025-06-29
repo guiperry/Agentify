@@ -40,8 +40,8 @@ export async function POST(request: Request) {
     // Create a UI config object that matches the expected format for conversion
     const uiConfigForConversion = {
       name: agentConfig.name,
-      // Explicitly add agent_name to ensure it's available for GitHub Actions compilation
-      agent_name: agentConfig.agent_name || agentConfig.name,
+      // CRITICAL FIX: Explicitly add agent_name to ensure it's available for GitHub Actions compilation
+      agent_name: agentConfig.agent_name || agentConfig.name || `agent-${Date.now()}`,
       personality: agentConfig.personality,
       instructions: agentConfig.instructions || `You are ${agentConfig.name}, a helpful AI assistant.`,
       features: agentConfig.features,

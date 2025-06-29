@@ -61,10 +61,17 @@ class GitHubActionsCompiler {
         agentName: config.agent_name || (config).name || 'undefined'
       });
       
+      // CRITICAL FIX: Ensure agent_name is always defined
       // If agent_name is missing but name exists, use that instead
-      if (!config.agent_name && (config).name) {
-        console.log('Setting agent_name from name property:', (config).name);
-        config.agent_name = (config).name;
+      if (!config.agent_name) {
+        if ((config).name) {
+          console.log('Setting agent_name from name property:', (config).name);
+          config.agent_name = (config).name;
+        } else {
+          // If neither agent_name nor name exists, set a default value
+          console.log('Setting default agent_name agent_name and name are missing');
+          config.agent_name = `agent-${Date.now()}`;
+        }
       }
       
       // Now use agent_name with fallback

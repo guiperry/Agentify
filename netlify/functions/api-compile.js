@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/compile
-// Generated: 2025-06-29T10:37:51.133Z
+// Generated: 2025-06-29T10:56:09.840Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createAgentCompilerService } = require('./lib/agent-compiler-interface.js');
@@ -68,8 +68,8 @@ async function POST(event, context) {
     // Create a UI config object that matches the expected format for conversion
     const uiConfigForConversion = {
       name: agentConfig.name,
-      // Explicitly add agent_name to ensure it's available for GitHub Actions compilation
-      agent_name: agentConfig.agent_name || agentConfig.name,
+      // CRITICAL FIX: Explicitly add agent_name to ensure it's available for GitHub Actions compilation
+      agent_name: agentConfig.agent_name || agentConfig.name || `agent-${Date.now()}`,
       personality: agentConfig.personality,
       instructions: agentConfig.instructions || `You are ${agentConfig.name}, a helpful AI assistant.`,
       features: agentConfig.features,
