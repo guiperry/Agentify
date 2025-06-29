@@ -90,7 +90,16 @@ export class SSEManager {
       return;
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_SSE_URL || '/api/stream';
+    // Determine the correct SSE endpoint based on environment
+    // In Netlify, we need to use /.netlify/functions/stream instead of /api/stream
+    const isNetlify = typeof window !== 'undefined' && 
+      (window.location.hostname.includes('netlify.app') || 
+       window.location.hostname.includes('agentify-nextjs.netlify.app'));
+    
+    const baseUrl = process.env.NEXT_PUBLIC_SSE_URL || 
+      (isNetlify ? '/.netlify/functions/stream' : '/api/stream');
+    
+    console.log(`Using SSE endpoint: ${baseUrl} (Netlify environment: ${isNetlify})`);
     const sseUrl = authToken ? `${baseUrl}?token=${authToken}` : baseUrl;
 
     try {
