@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/register-agent
-// Generated: 2025-06-29T08:55:09.567Z
+// Generated: 2025-06-29T09:07:01.136Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 const { createClient, SupabaseClient } = require('@supabase/supabase-js');

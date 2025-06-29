@@ -566,15 +566,20 @@ const AgentConfig = ({
           'Authorization': `Bearer ${auth.user.accessToken}`
         },
         body: JSON.stringify({
-          agentId: agentFacts.id,
-          agentName: agentName,
-          agentConfig: {
+          identity: {
+            id: agentFacts.id,
             name: agentName,
             type: 'custom',
-            personality,
+            agentFacts
+          },
+          personality: {
+            description: personality,
             instructions,
+            creativity: creativity[0]
+          },
+          capabilities: {
             features,
-            agentFacts,
+            mcpServers,
             settings: {
               creativity: creativity[0],
               mcpServers
@@ -643,15 +648,20 @@ const AgentConfig = ({
           'Authorization': `Bearer ${auth.user.accessToken}`
         },
         body: JSON.stringify({
-          agentId: agentFacts.id,
-          agentName: agentName,
-          agentConfig: {
+          identity: {
+            id: agentFacts.id,
             name: agentName,
             type: 'custom',
-            personality,
+            agentFacts
+          },
+          personality: {
+            description: personality,
             instructions,
+            creativity: creativity[0]
+          },
+          capabilities: {
             features,
-            agentFacts,
+            mcpServers,
             settings: {
               creativity: creativity[0],
               mcpServers

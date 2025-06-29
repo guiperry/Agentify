@@ -1,6 +1,6 @@
 // Auto-generated Netlify function from Next.js API route
 // Original route: /api/deploy/[id]/rollback
-// Generated: 2025-06-29T08:55:09.559Z
+// Generated: 2025-06-29T09:07:01.127Z
 
 // NextResponse/NextRequest converted to native Netlify response format
 
