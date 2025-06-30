@@ -4,54 +4,60 @@
 
 Agentify is a comprehensive platform for building, configuring, and deploying AI agents with enhanced developer experience. It provides a user-friendly interface for creating custom AI agents that can be integrated with various applications and services.
 
-**Project URL**: https://agentify-nextjs.netlify.app/
+**Project URL**: https://ai-agentify.vercel.app/
 
 ## Key Features
 
 - **Visual Agent Configuration**: Intuitive UI for configuring AI agent personality, capabilities, and behavior
-- **Agent Compilation**: Backend service that compiles agent configurations into deployable plugins
+- **Agent Compilation**: Full-featured compilation service for agent configurations
 - **Multi-Platform Support**: Build agents for Windows, macOS, and Linux
-- **LLM Integration**: Connect to various LLM providers including OpenAI, Google, Cerebras, and more
+- **LLM Integration**: Connect to various LLM providers including Google Gemini, OpenAI, and more
 - **Tool Configuration**: Define custom tools for your agents with rich parameter types
-- **Credential Management**: Secure handling of API keys and other sensitive information
-- **Terminal UI**: Interactive terminal interface for agent interaction
+- **Secure Credential Management**: Encrypted API key storage with Supabase
+- **Real-time Updates**: Server-Sent Events (SSE) for compilation and deployment progress
 - **Multi-Language Subagents**: Create and manage subagents in different programming languages
 - **Testing and Debugging**: Comprehensive tools for testing and debugging agents
+- **User Authentication**: Supabase authentication with Google OAuth support
 
 ## Technical Architecture
 
-Agentify consists of two main components:
+Agentify uses a modern full-stack architecture:
 
 ### 1. Frontend Application
 
-- **Framework**: Next.js with TypeScript
+- **Framework**: Next.js 14+ with TypeScript
 - **UI Components**: shadcn-ui (Radix UI + Tailwind CSS)
-- **State Management**: React Context API
+- **State Management**: React Context API and React Query
 - **Routing**: Next.js App Router
-- **API Integration**: Next.js API Routes and React Query
+- **Authentication**: Supabase Auth with JWT
+- **Real-time Updates**: Server-Sent Events (SSE)
 
 The frontend provides a step-by-step workflow for:
+- User authentication and profile management
 - Connecting to applications
 - Configuring agent personality and capabilities
 - Deploying agents to target platforms
 - Monitoring agent performance
 
-### 2. Backend Server
+### 2. Backend Services
 
-- **Framework**: Express.js
-- **Language**: Node.js with TypeScript
-- **Compiler Service**: Go-based compilation system
-- **Database**: SQLite for persistence
+- **Hosting**: Vercel (full Next.js application)
+- **Database**: Supabase PostgreSQL
+- **Authentication**: Supabase Auth
+- **Compilation Service**: Integrated Go-based compilation system
+- **Real-time Updates**: Server-Sent Events (SSE)
+- **GitHub Actions**: Fallback compilation service when needed
 
-The backend server provides:
-- API endpoints for compiling agent configurations
-- Real-time compilation status updates
-- Plugin binary generation
-- Dependency management for compilation
+The backend provides:
+- API endpoints for validating and compiling agent configurations
+- Long-running compilation processes with real-time status updates
+- Plugin binary generation with full system access
+- Secure API key management with encryption
+- User data persistence with row-level security
 
 ## Agent Compilation Process
 
-The agent compilation process has been moved from client-side to a backend server, allowing for:
+The agent compilation process runs on the Vercel-hosted Next.js application, allowing for:
 - Access to system resources (file system, process execution)
 - Dependency management (Go, Python, GCC/Clang)
 - Cross-platform compilation
@@ -107,8 +113,22 @@ NEXT_PUBLIC_GEMINI_MODEL_NAME=gemini-1.5-flash
 # Server Configuration
 PORT=3000
 
+# Supabase Configuration
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+
+# GitHub Actions Configuration (Optional)
+GITHUB_TOKEN=your-github-token
+GITHUB_OWNER=your-github-username
+GITHUB_REPO=your-repository-name
+GITHUB_WORKFLOW_ID=compile-plugin.yml
+
 # Google OAuth Configuration (Optional)
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id-here.apps.googleusercontent.com
+
+# Security
+API_KEY_ENCRYPTION_KEY=your-32-character-encryption-key
 ```
 
 #### Google OAuth Setup (Optional)
@@ -135,11 +155,6 @@ For frontend development without real compilation:
 ```bash
 # Run the Next.js development server with mock compiler
 npm run dev
-
-# Run just the backend with mock compiler
-npm run server
-# or with auto-restart
-npm run server:dev
 ```
 
 #### Real Compiler Mode
@@ -159,6 +174,9 @@ npm run dev:real
 # Test the compilation pipeline
 npm run test-compilation
 
+# Test GitHub Actions compilation
+npm run test-github-actions
+
 # Build for production
 npm run build
 
@@ -170,9 +188,10 @@ See [COMPILATION_GUIDE.md](docs/COMPILATION_GUIDE.md) for detailed compilation d
 
 ### Accessing the Application
 
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:3000/api
-- **Compiled Plugins**: http://localhost:3000/api/output/plugins/
+- **Development**: http://localhost:3000
+- **Production**: https://ai-agentify.vercel.app/
+- **API Endpoints**: /api/*
+- **Compiled Plugins**: /api/output/plugins/
 
 ## Project Structure
 
@@ -214,7 +233,7 @@ Agents can be deployed in various ways:
 - As standalone applications
 - As plugins for existing applications
 - As API services
-- As embedded components
+- As embedded components with a blockchain
 
 ### Subagent Management
 
@@ -230,14 +249,18 @@ Contributions are welcome! See the [developer guide](./docs/developer-guide.md) 
 
 ## Deployment
 
-You can deploy this project through [Lovable](https://lovable.dev/projects/861858ee-b997-4235-b6c8-e39849fa6c69) by clicking on Share -> Publish.
+This project is deployed on Vercel as a full Next.js application. You can deploy your own instance by:
+
+1. Fork the repository
+2. Connect it to your Vercel account
+3. Configure the required environment variables
 
 ### Custom Domain
 
-To connect a custom domain to your deployed project:
-1. Navigate to Project > Settings > Domains
-2. Click Connect Domain
-3. Follow the instructions in the [custom domain setup guide](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+To connect a custom domain to your Vercel deployment:
+1. Navigate to your project in the Vercel dashboard
+2. Go to Settings > Domains
+3. Add your custom domain and follow the verification steps
 
 ## License
 
